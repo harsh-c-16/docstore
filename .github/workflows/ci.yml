@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        preset: [release, asan, tsan]
+    env:
+      CC: ${{ matrix.compiler == 'gcc' && 'gcc' || 'clang' }}
+      CXX: ${{ matrix.compiler == 'gcc' && 'g++' || 'clang++' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      # ThreadSanitizer cannot map its shadow memory with the runner's default ASLR entropy.
+      - name: Lower ASLR entropy for TSan
+        if: matrix.preset == 'tsan'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} -DDOCSTORE_WERROR=ON
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j
+      - name: Fast test suite
+        run: ctest --preset ${{ matrix.preset }} -L fast
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: |
+          pip install clang-format==23.1.5
+          git ls-files '*.cpp' '*.h' | xargs clang-format --dry-run --Werror
