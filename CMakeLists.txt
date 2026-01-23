@@ -22,6 +22,10 @@ elseif(NOT DOCSTORE_SANITIZE STREQUAL "")
   message(FATAL_ERROR "Unknown DOCSTORE_SANITIZE value: ${DOCSTORE_SANITIZE}")
 endif()
 
+# Re-extracted archives get fresh timestamps so dependents rebuild (CMake >= 3.24).
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
 include(FetchContent)
 FetchContent_Declare(nlohmann_json
   URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
