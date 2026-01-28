@@ -10,6 +10,11 @@ and every place the implementation deviates from its original requirements. It g
 | D1 | Dependencies are pulled as release tarballs with a SHA-256 (`URL_HASH`) instead of `GIT_TAG`. | Same pinned versions (json v3.11.3, googletest v1.15.2); the hash pins the exact bytes and a tarball download is faster than a clone. |
 | D2 | One test binary (`docstore_tests`); every gtest case is registered with ctest under the `fast` label. The `long` label re-runs the scalable tests with `DOCSTORE_LONG=1`. | A binary per component links slower and duplicates setup; one binary still lets `ctest -j` run cases in parallel. |
 | D3 | Tests keep scratch files in `build/<preset>/test_tmp` (via `TEST_TMPDIR`), not `/tmp`. | `/tmp` is a tmpfs on many machines, which would hide fsync behaviour and fill RAM. |
+| D4 | FaultInjectionEnv *extends* MemEnv (inherits its inode map and adds a durable namespace) rather than wrapping a MemEnv instance. | Power loss must swap inode pointers between the visible and durable namespaces, which needs MemEnv's internals; a wrapper would have to duplicate the whole file map. |
+| D5 | In MemEnv/FaultInjectionEnv, directories are durable as soon as they are created; only files inside a directory follow the SyncDir rules. | The database directory is created once; the crash bugs worth catching are about files (WAL, SST, MANIFEST, CURRENT) inside it. |
+| D6 | `WritableFile::Sync()` only fdatasyncs data already handed over by `Flush()`; it never touches the user-space buffer. | If Sync also flushed the buffer, the WAL syncer thread (calling Sync without the WAL mutex) would race with writers appending to that buffer. Single-threaded users call Flush() then Sync(). |
+| D7 | The memtable arena is single-threaded for allocation. | Only the writer (holding the engine's write mutex) inserts; readers never allocate. MemoryUsage() is an atomic so Stats can read it from any thread. |
+| D8 | The fault model is the strict POSIX worst case: after power loss a file holds exactly its last-synced prefix, and a create/rename/delete survives only if its directory was synced. | Real ext4 is usually kinder (e.g. it often persists the directory entry with the file), so a design that passes this model also passes on real disks; the reverse is not true. |
 
 ## Deviations from the original requirements
 
