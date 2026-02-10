@@ -68,3 +68,11 @@ file(MAKE_DIRECTORY ${DOCSTORE_TEST_TMP})
 gtest_discover_tests(docstore_tests
   DISCOVERY_MODE PRE_TEST
   PROPERTIES LABELS fast ENVIRONMENT "TEST_TMPDIR=${DOCSTORE_TEST_TMP}/")
+
+# The long suite re-runs the scalable tests (model, crash, power-loss, stress) with more
+# iterations; each test reads DOCSTORE_LONG=1 through test::LongMode().
+set(DOCSTORE_LONG_FILTER "EngineModel*:DocModel*:PowerLoss*:ProcessCrash*:Stress*")
+add_test(NAME long_suite COMMAND docstore_tests --gtest_filter=${DOCSTORE_LONG_FILTER})
+set_tests_properties(long_suite PROPERTIES
+  LABELS long TIMEOUT 7200
+  ENVIRONMENT "DOCSTORE_LONG=1;TEST_TMPDIR=${DOCSTORE_TEST_TMP}/")
