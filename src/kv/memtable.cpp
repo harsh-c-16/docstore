@@ -1,7 +1,5 @@
 #include "kv/memtable.h"
 
-#include <cstring>
-
 #include "util/coding.h"
 
 namespace docstore::kv {
@@ -27,12 +25,12 @@ void MemTable::Add(SequenceNumber seq, ValueType type, std::string_view user_key
       VarintLength(ikey_len) + ikey_len + VarintLength(value.size()) + value.size();
   char* buf = arena_.Allocate(encoded_len);
   char* p = EncodeVarint64(buf, ikey_len);
-  std::memcpy(p, user_key.data(), user_key.size());
-  p += user_key.size();
+  // string_view::copy, unlike memcpy, is defined for an empty view with a null data().
+  p += user_key.copy(p, user_key.size());
   EncodeFixed64(p, PackSequenceAndType(seq, type));
   p += kInternalKeyTrailer;
   p = EncodeVarint64(p, value.size());
-  std::memcpy(p, value.data(), value.size());
+  value.copy(p, value.size());
   table_.Insert(buf);
   num_entries_.fetch_add(1, std::memory_order_relaxed);
 }
