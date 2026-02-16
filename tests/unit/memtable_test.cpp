@@ -25,11 +25,14 @@ std::string IKey(std::string_view user_key, SequenceNumber seq, ValueType t) {
 
 TEST(DbFormatTest, ParseRoundTrip) {
   ParsedInternalKey p;
-  ASSERT_TRUE(ParseInternalKey(IKey("user", 12345, ValueType::kDeletion), &p));
+  // p.user_key points into the key, so the key must outlive p.
+  const std::string key = IKey("user", 12345, ValueType::kDeletion);
+  ASSERT_TRUE(ParseInternalKey(key, &p));
   EXPECT_EQ(p.user_key, "user");
   EXPECT_EQ(p.sequence, 12345u);
   EXPECT_EQ(p.type, ValueType::kDeletion);
-  ASSERT_TRUE(ParseInternalKey(IKey("", kMaxSequenceNumber, ValueType::kValue), &p));
+  const std::string max_key = IKey("", kMaxSequenceNumber, ValueType::kValue);
+  ASSERT_TRUE(ParseInternalKey(max_key, &p));
   EXPECT_EQ(p.sequence, kMaxSequenceNumber);
   EXPECT_FALSE(ParseInternalKey("short", &p));
   std::string bad = IKey("k", 1, ValueType::kValue);

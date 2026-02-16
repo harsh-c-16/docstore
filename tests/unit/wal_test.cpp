@@ -148,7 +148,8 @@ TEST_F(WalTest, MidFileCorruptionIsDetectedAndNeverReturnsLaterRecords) {
 }
 
 TEST_F(WalTest, OversizedLengthIsCorruptionNotAllocation) {
-  std::string contents = WriteLog({"ok", "victim"});
+  std::vector<std::string> records = {"ok", std::string(10, 'v')};
+  std::string contents = WriteLog(records);
   size_t second = kLogHeaderSize + 2;
   EncodeFixed32(contents.data() + second + 4, 0xFFFFFFF0u);
   LogReader reader(contents);
