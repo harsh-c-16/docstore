@@ -5,6 +5,7 @@
 namespace docstore {
 
 char* Arena::Allocate(size_t bytes) {
+  memory_usage_.fetch_add(bytes, std::memory_order_relaxed);
   if (bytes <= alloc_remaining_) {
     char* result = alloc_ptr_;
     alloc_ptr_ += bytes;
@@ -18,6 +19,7 @@ char* Arena::AllocateAligned(size_t bytes) {
   constexpr size_t kAlign = alignof(std::max_align_t);
   size_t mod = reinterpret_cast<uintptr_t>(alloc_ptr_) & (kAlign - 1);
   size_t slop = mod == 0 ? 0 : kAlign - mod;
+  memory_usage_.fetch_add(bytes + slop, std::memory_order_relaxed);
   if (bytes + slop <= alloc_remaining_) {
     char* result = alloc_ptr_ + slop;
     alloc_ptr_ += bytes + slop;
@@ -43,7 +45,6 @@ char* Arena::AllocateFallback(size_t bytes) {
 
 char* Arena::AllocateNewBlock(size_t bytes) {
   blocks_.push_back(std::make_unique_for_overwrite<char[]>(bytes));
-  memory_usage_.fetch_add(bytes + sizeof(char*), std::memory_order_relaxed);
   return blocks_.back().get();
 }
 

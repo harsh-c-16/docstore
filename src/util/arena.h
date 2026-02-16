@@ -23,7 +23,9 @@ class Arena {
   // Aligned for any type (alignof(std::max_align_t)); skiplist nodes hold atomics.
   char* AllocateAligned(size_t bytes);
 
-  // Total bytes reserved from the system. Safe to read from any thread.
+  // Bytes handed out to callers (including alignment padding). This, not the reserved block
+  // memory, decides when a memtable is full, so even a tiny test memtable holds many entries.
+  // Safe to read from any thread.
   size_t MemoryUsage() const { return memory_usage_.load(std::memory_order_relaxed); }
 
  private:
