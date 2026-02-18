@@ -56,7 +56,7 @@ class EngineModel {
         }
       }
       ASSERT_TRUE(engine_->Write(WriteOptions(), &batch).ok());
-    } else if (r < 98) {
+    } else if (r < 96) {
       std::string k = RandomKey();
       std::string got;
       Status s = engine_->Get(k, &got);
@@ -67,6 +67,8 @@ class EngineModel {
         ASSERT_TRUE(s.ok()) << k << " " << s.ToString();
         ASSERT_EQ(got, it->second) << k;
       }
+    } else if (r < 98) {
+      ASSERT_TRUE(engine_->Flush().ok());
     } else {
       Reopen();
     }
