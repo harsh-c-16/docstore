@@ -17,11 +17,17 @@ and every place the implementation deviates from its original requirements. It g
 | D9 | The skiplist is LevelDB's design: one writer, lock-free readers, nodes never deleted, publication by release store / acquire load. It has no `Prev()`. | A mutex-protected `std::map` would make every read take a lock. A lock-free multi-writer list (CAS on insert) is unnecessary because writes are serialized anyway. Reverse iteration is not used by any query. |
 | D10 | `LogReader` parses a log that was read fully into memory instead of streaming from a `SequentialFile`. | WAL files are bounded by `memtable_size` plus one batch, and MANIFESTs are tiny, so memory is not a concern; parsing a buffer makes torn-tail detection (which looks ahead) simple. |
 | D11 | MANIFEST recovery accepts a bad final record only if it was cut off by end of file, its CRC does not verify at the length implied by end of file, and no valid record exists after it (`LogReader::BadRecordIsTornTail`). Anything else is `Corruption`. | A plain "stop at the first bad record" rule would turn a flipped length byte in the middle of the MANIFEST into silent data loss (later edits ignored, their WALs already deleted). LevelDB's rule (an incomplete trailing record is EOF) has the same weakness. The WAL keeps the simpler rule: a bad record in the newest WAL is a torn tail. |
+| D12 | Table files are deleted by `~TableFile` once obsolete and unreferenced (RAII), so the unlink can run on whichever thread drops the last Version, including a reader. | A reference-counted "pending deletes" list processed by the background thread would keep unlinks off reader threads, at the cost of a second lifecycle mechanism. An unlink is cheap; simplicity wins. |
+| D13 | `Open` always writes a fresh MANIFEST snapshot and switches CURRENT; at runtime the MANIFEST only grows by one small edit per flush/compaction and is never rolled over. | LevelDB rolls the MANIFEST when it gets large. Ours stays tiny (about 100 bytes per edit) and is compacted at every open, so rollover code would never matter in practice. |
+| D14 | Flush keeps only the newest version of each key (tombstones included); compaction keeps only the newest version and drops tombstones. | Safe because there are no long-lived user snapshots: a reader pins `{mem, imm, Version, sequence}` together, and every reader that can see a new table took its snapshot after the table was installed, so it is newer than every entry in it. User-visible snapshots (future work) would need a snapshot list to keep older versions. |
+| D15 | `next_file_number` is raised past every numbered file found in the directory at open, in addition to the MANIFEST value. | WAL rotation allocates numbers without writing the MANIFEST, so after a crash the MANIFEST's counter can be behind a WAL that exists on disk. |
 | D8 | The fault model is the strict POSIX worst case: after power loss a file holds exactly its last-synced prefix, and a create/rename/delete survives only if its directory was synced. | Real ext4 is usually kinder (e.g. it often persists the directory entry with the file), so a design that passes this model also passes on real disks; the reverse is not true. |
 
 ## Deviations from the original requirements
 
-None yet.
+| # | Requirement | What we do | Why |
+|---|---|---|---|
+| X1 | a torn tail in the newest WAL is truncated at the last good record. | Recovery stops at the last good record and logs a warning, but does not truncate the file in place. | Open always flushes the recovered data to L0, writes a new MANIFEST and then deletes every replayed WAL, so the torn file is never appended to or read again. If Open crashes first, the next Open replays the same prefix. Truncation would be dead code. |
 
 ## Lock order
 
