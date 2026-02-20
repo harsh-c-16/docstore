@@ -290,72 +290,35 @@ Status Engine::Flush() {
 
 // ---------------------------------------------------------------- read path
 
-namespace {
-
-bool InRange(std::string_view user_key, const FileMeta& f) {
-  return user_key >= ExtractUserKey(f.smallest) && user_key <= ExtractUserKey(f.largest);
+std::shared_ptr<const Snapshot> Engine::GetSnapshot() {
+  std::lock_guard<std::mutex> l(mutex_);
+  // One lock covers all four, so the view is consistent: every entry with sequence <= the
+  // snapshot is in these memtables or in this Version's tables.
+  return std::make_shared<const Snapshot>(mem_, imm_, versions_->current(),
+                                          last_visible_sequence_.load(std::memory_order_acquire),
+                                          &read_stats_);
 }
 
-}  // namespace
-
 Status Engine::Get(std::string_view key, std::string* value) {
-  std::shared_ptr<MemTable> mem, imm;
-  std::shared_ptr<const Version> version;
-  SequenceNumber snapshot;
   {
     std::lock_guard<std::mutex> l(mutex_);
     if (closed_) return Status::InvalidArgument("database is closed");
-    mem = mem_;
-    imm = imm_;
-    version = versions_->current();
-    snapshot = last_visible_sequence_.load(std::memory_order_acquire);
   }
-  // Newest data first: memtable, immutable memtable, L0 newest to oldest, then L1.
-  for (const MemTable* m : {mem.get(), imm.get()}) {
-    if (m == nullptr) continue;
-    switch (m->Get(key, snapshot, value)) {
-      case MemTable::LookupResult::kFound:
-        return Status::OK();
-      case MemTable::LookupResult::kDeleted:
-        return Status::NotFound();
-      case MemTable::LookupResult::kNotPresent:
-        break;
-    }
+  return GetSnapshot()->Get(key, value);
+}
+
+std::unique_ptr<Iterator> Engine::NewIterator(const ReadOptions& options) {
+  return GetSnapshot()->NewIterator(options);
+}
+
+Status Engine::Scan(const ReadOptions& options, size_t limit,
+                    std::vector<std::pair<std::string, std::string>>* out) {
+  out->clear();
+  auto it = NewIterator(options);
+  for (; it->Valid() && (limit == 0 || out->size() < limit); it->Next()) {
+    out->emplace_back(std::string(it->key()), std::string(it->value()));
   }
-  const std::string lookup = MakeLookupKey(key, snapshot);
-  auto search = [&](const FileMeta& f, bool* done) -> Status {
-    *done = false;
-    const TableReader& table = f.table->reader();
-    if (table.has_filter()) {
-      stat_bloom_checks_.fetch_add(1, std::memory_order_relaxed);
-      if (!table.KeyMayMatch(key)) {
-        stat_bloom_useful_.fetch_add(1, std::memory_order_relaxed);
-        return Status::OK();
-      }
-    }
-    TableReader::GetResult result;
-    Status s = table.Get(lookup, &result, value);
-    if (!s.ok()) return s;
-    *done = result != TableReader::GetResult::kNotPresent;
-    return result == TableReader::GetResult::kDeleted ? Status::NotFound() : Status::OK();
-  };
-  for (const auto& f : version->files[0]) {
-    if (!InRange(key, *f)) continue;
-    bool done;
-    Status s = search(*f, &done);
-    if (!s.ok() || done) return s;
-  }
-  // L1 files are disjoint and sorted: at most one can hold the key.
-  const auto& l1 = version->files[1];
-  auto it = std::lower_bound(l1.begin(), l1.end(), key, [](const auto& f, std::string_view k) {
-    return ExtractUserKey(f->largest) < k;
-  });
-  if (it != l1.end() && InRange(key, **it)) {
-    bool done;
-    Status s = search(**it, &done);
-    if (!s.ok() || done) return s;
-  }
-  return Status::NotFound();
+  return it->status();
 }
 
 // ---------------------------------------------------------------- background work
@@ -464,8 +427,8 @@ nlohmann::json Engine::Stats() {
   j["flushes"] = stat_flushes_.load();
   j["flush_bytes_written"] = stat_flush_bytes_.load();
   j["user_bytes_written"] = stat_user_bytes_.load();
-  j["bloom_checks"] = stat_bloom_checks_.load();
-  j["bloom_useful"] = stat_bloom_useful_.load();
+  j["bloom_checks"] = read_stats_.bloom_checks.load();
+  j["bloom_useful"] = read_stats_.bloom_useful.load();
   j["stall_micros"] = stat_stall_micros_.load();
   j["block_cache_hits"] = cache_ ? cache_->hits() : 0;
   j["block_cache_misses"] = cache_ ? cache_->misses() : 0;

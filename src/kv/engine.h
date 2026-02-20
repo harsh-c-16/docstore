@@ -14,12 +14,15 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include "docstore/options.h"
 #include "docstore/status.h"
 #include "kv/dbformat.h"
+#include "kv/snapshot.h"
 #include "kv/version_edit.h"
 #include "kv/write_batch.h"
 
@@ -54,6 +57,14 @@ class Engine {
 
   // NotFound if the key is absent or deleted.
   Status Get(std::string_view key, std::string* value);
+
+  // A consistent read view of the current state (see snapshot.h).
+  std::shared_ptr<const Snapshot> GetSnapshot();
+  // User-key iterator over [lower, upper) at a fresh snapshot, already positioned at the start.
+  std::unique_ptr<Iterator> NewIterator(const ReadOptions& options);
+  // Collects up to `limit` (0 = all) key/value pairs of [lower, upper).
+  Status Scan(const ReadOptions& options, size_t limit,
+              std::vector<std::pair<std::string, std::string>>* out);
 
   // Forces the memtable into an L0 SSTable and waits for it.
   Status Flush();
@@ -115,8 +126,7 @@ class Engine {
   // Statistics.
   std::atomic<uint64_t> stat_flushes_{0};
   std::atomic<uint64_t> stat_flush_bytes_{0};
-  std::atomic<uint64_t> stat_bloom_checks_{0};
-  std::atomic<uint64_t> stat_bloom_useful_{0};
+  ReadStats read_stats_;
   std::atomic<uint64_t> stat_stall_micros_{0};
   std::atomic<uint64_t> stat_user_bytes_{0};
 };
