@@ -33,16 +33,16 @@ class EngineModel {
   void Step(int i) {
     SCOPED_TRACE("op " + std::to_string(i));
     uint64_t r = rnd_.Uniform(100);
-    if (r < 45) {
+    if (r < 40) {
       std::string k = RandomKey();
       std::string v = "v" + std::to_string(i) + std::string(rnd_.Uniform(100), 'x');
       ASSERT_TRUE(engine_->Put(WriteOptions(), k, v).ok());
       model_[k] = v;
-    } else if (r < 60) {
+    } else if (r < 53) {
       std::string k = RandomKey();
       ASSERT_TRUE(engine_->Delete(WriteOptions(), k).ok());
       model_.erase(k);
-    } else if (r < 70) {
+    } else if (r < 63) {
       // Multi-key batch: applied atomically.
       WriteBatch batch;
       for (int j = 0; j < 5; j++) {
@@ -56,7 +56,7 @@ class EngineModel {
         }
       }
       ASSERT_TRUE(engine_->Write(WriteOptions(), &batch).ok());
-    } else if (r < 96) {
+    } else if (r < 88) {
       std::string k = RandomKey();
       std::string got;
       Status s = engine_->Get(k, &got);
@@ -67,6 +67,8 @@ class EngineModel {
         ASSERT_TRUE(s.ok()) << k << " " << s.ToString();
         ASSERT_EQ(got, it->second) << k;
       }
+    } else if (r < 96) {
+      CheckScan();
     } else if (r < 98) {
       ASSERT_TRUE(engine_->Flush().ok());
     } else {
@@ -74,7 +76,33 @@ class EngineModel {
     }
   }
 
+  // Random [lower, upper) range (either side may be open) with a random limit.
+  void CheckScan() {
+    ReadOptions ro;
+    if (!rnd_.OneIn(4)) ro.lower = RandomKey();
+    if (!rnd_.OneIn(4)) ro.upper = RandomKey();
+    size_t limit = rnd_.OneIn(2) ? 0 : 1 + rnd_.Uniform(20);
+    std::vector<std::pair<std::string, std::string>> got;
+    ASSERT_TRUE(engine_->Scan(ro, limit, &got).ok());
+    std::vector<std::pair<std::string, std::string>> want;
+    for (auto it = model_.lower_bound(ro.lower);
+         it != model_.end() && (ro.upper.empty() || it->first < ro.upper) &&
+         (limit == 0 || want.size() < limit);
+         ++it) {
+      want.emplace_back(*it);
+    }
+    ASSERT_EQ(got, want) << "[" << ro.lower << ", " << ro.upper << ") limit " << limit;
+  }
+
+  void CheckScanAll() {
+    std::vector<std::pair<std::string, std::string>> got;
+    ASSERT_TRUE(engine_->Scan(ReadOptions(), 0, &got).ok());
+    std::vector<std::pair<std::string, std::string>> want(model_.begin(), model_.end());
+    ASSERT_EQ(got, want);
+  }
+
   void VerifyAll() {
+    CheckScanAll();
     for (int k = 0; k < 500; k++) {
       std::string key = "key" + std::to_string(k);
       std::string got;

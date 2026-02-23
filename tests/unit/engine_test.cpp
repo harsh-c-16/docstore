@@ -236,3 +236,78 @@ TEST(EngineEmptyTest, OpensOnRealFilesystem) {
 
 }  // namespace
 }  // namespace docstore::kv
+
+namespace docstore::kv {
+namespace {
+
+using KVs = std::vector<std::pair<std::string, std::string>>;
+
+TEST_F(EngineTest, ScanHonoursBoundsTombstonesAndLimit) {
+  Put("a", "1");
+  Put("b", "2");
+  Put("c", "3");
+  ASSERT_TRUE(engine_->Flush().ok());
+  Put("b", "2b");                                       // newer version in the memtable
+  ASSERT_TRUE(engine_->Delete(WriteOptions(), "c").ok());  // tombstone over a flushed key
+  Put("d", "4");
+  KVs out;
+  ASSERT_TRUE(engine_->Scan(ReadOptions(), 0, &out).ok());
+  EXPECT_EQ(out, (KVs{{"a", "1"}, {"b", "2b"}, {"d", "4"}}));
+  ASSERT_TRUE(engine_->Scan(ReadOptions{"b", "d"}, 0, &out).ok());
+  EXPECT_EQ(out, (KVs{{"b", "2b"}}));
+  ASSERT_TRUE(engine_->Scan(ReadOptions{"a", ""}, 2, &out).ok());
+  EXPECT_EQ(out, (KVs{{"a", "1"}, {"b", "2b"}}));
+  ASSERT_TRUE(engine_->Scan(ReadOptions{"e", ""}, 0, &out).ok());
+  EXPECT_TRUE(out.empty());
+}
+
+TEST_F(EngineTest, ScanStaysConsistentWhileWritesAndFlushesHappen) {
+  options_.memtable_size = 8 << 10;
+  Open();
+  for (int i = 0; i < 1000; i++) Put("k" + std::to_string(1000 + i), "v1");
+  auto it = engine_->NewIterator(ReadOptions());
+  // Rewrite, delete and flush everything after the scan started.
+  for (int i = 0; i < 1000; i++) {
+    if (i % 3 == 0) {
+      ASSERT_TRUE(engine_->Delete(WriteOptions(), "k" + std::to_string(1000 + i)).ok());
+    } else {
+      Put("k" + std::to_string(1000 + i), "v2");
+    }
+  }
+  Put("k0500", "new key");
+  ASSERT_TRUE(engine_->Flush().ok());
+  int n = 0;
+  for (; it->Valid(); it->Next(), n++) {
+    ASSERT_EQ(it->key(), "k" + std::to_string(1000 + n));
+    ASSERT_EQ(it->value(), "v1");
+  }
+  EXPECT_TRUE(it->status().ok());
+  EXPECT_EQ(n, 1000);
+
+  // A snapshot's Get and iterator agree with each other, not with later writes.
+  auto snap = engine_->GetSnapshot();
+  Put("k1001", "v3");
+  std::string v;
+  ASSERT_TRUE(snap->Get("k1001", &v).ok());
+  EXPECT_EQ(v, "v2");
+  EXPECT_TRUE(snap->Get("k1000", &v).IsNotFound());
+  EXPECT_EQ(Get("k1001"), "v3");
+}
+
+TEST_F(EngineTest, ScanReportsCorruptionInsteadOfSkippingData) {
+  for (int i = 0; i < 2000; i++) Put("k" + std::to_string(10000 + i), std::string(100, 'v'));
+  ASSERT_TRUE(engine_->Flush().ok());
+  engine_.reset();
+  auto tables = Files(FileType::kTable);
+  ASSERT_EQ(tables.size(), 1u);
+  CorruptFile(TableFileName("/db", tables[0]), 100);
+  Open();  // footer, index and filter are fine; the first data block is not
+  KVs out;
+  EXPECT_TRUE(engine_->Scan(ReadOptions(), 0, &out).IsCorruption());
+  std::string v;
+  EXPECT_TRUE(engine_->Get("k10000", &v).IsCorruption());
+  EXPECT_TRUE(engine_->Get("k11999", &v).ok());  // undamaged block
+}
+
+}  // namespace
+}  // namespace docstore::kv
