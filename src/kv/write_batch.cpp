@@ -5,7 +5,10 @@
 
 namespace docstore::kv {
 
-void WriteBatch::Clear() { rep_.assign(kHeaderSize, '\0'); }
+void WriteBatch::Clear() {
+  rep_.assign(kHeaderSize, '\0');
+  user_bytes_ = 0;
+}
 
 uint32_t WriteBatch::Count() const { return DecodeFixed32(rep_.data() + 8); }
 
@@ -15,6 +18,7 @@ void WriteBatch::SetSequence(SequenceNumber seq) { EncodeFixed64(rep_.data(), se
 
 void WriteBatch::Put(std::string_view key, std::string_view value) {
   EncodeFixed32(rep_.data() + 8, Count() + 1);
+  user_bytes_ += key.size() + value.size();
   rep_.push_back(static_cast<char>(ValueType::kValue));
   PutLengthPrefixed(&rep_, key);
   PutLengthPrefixed(&rep_, value);
@@ -22,6 +26,7 @@ void WriteBatch::Put(std::string_view key, std::string_view value) {
 
 void WriteBatch::Delete(std::string_view key) {
   EncodeFixed32(rep_.data() + 8, Count() + 1);
+  user_bytes_ += key.size();
   rep_.push_back(static_cast<char>(ValueType::kDeletion));
   PutLengthPrefixed(&rep_, key);
 }

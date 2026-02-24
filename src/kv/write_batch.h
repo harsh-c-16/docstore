@@ -31,6 +31,8 @@ class WriteBatch {
 
   std::string_view Contents() const { return rep_; }
   size_t ApproximateSize() const { return rep_.size(); }
+  // Key + value bytes added with Put/Delete: the "user bytes" of write amplification.
+  uint64_t user_bytes() const { return user_bytes_; }
   // Adopts an encoded batch (read back from the WAL). Only the header length is checked here;
   // Iterate() validates every record.
   Status SetContents(std::string_view contents);
@@ -46,6 +48,7 @@ class WriteBatch {
 
  private:
   std::string rep_;
+  uint64_t user_bytes_ = 0;
 };
 
 // Applies the batch to the memtable; record i gets sequence Sequence() + i.
