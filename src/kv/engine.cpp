@@ -1,11 +1,13 @@
 #include "kv/engine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <set>
 #include <vector>
 
 #include "env/env.h"
 #include "kv/block_cache.h"
+#include "kv/compaction.h"
 #include "kv/filename.h"
 #include "kv/log_reader.h"
 #include "kv/log_writer.h"
@@ -206,15 +208,28 @@ Status Engine::Close() {
 
 Status Engine::MakeRoomForWrite(bool force) {
   std::unique_lock<std::mutex> l(mutex_);
+  bool allow_delay = !force;
   while (true) {
     if (closed_) return Status::InvalidArgument("database is closed");
     if (!bg_error_.ok()) return Status::ReadOnly(bg_error_.ToString());
+    const int l0_files = versions_->current()->NumFiles(0);
+    if (allow_delay && l0_files >= options_.l0_slowdown_trigger) {
+      // Compaction is falling behind: give it 1 ms per write instead of hitting the hard stop
+      // later and stalling for a whole compaction. Only once per write.
+      l.unlock();
+      uint64_t start = env_->NowMicros();
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      stat_stall_micros_ += env_->NowMicros() - start;
+      allow_delay = false;
+      l.lock();
+      continue;
+    }
     if (force ? mem_->num_entries() == 0
               : mem_->ApproximateMemoryUsage() < options_.memtable_size) {
       return Status::OK();
     }
-    if (imm_ != nullptr) {
-      // The previous memtable is still being flushed: wait (a write stall).
+    if (imm_ != nullptr || l0_files >= options_.l0_stop_trigger) {
+      // The previous memtable is still being flushed, or L0 is full: wait (a write stall).
       uint64_t start = env_->NowMicros();
       bg_done_cv_.wait(l);
       stat_stall_micros_ += env_->NowMicros() - start;
@@ -235,6 +250,7 @@ Status Engine::MakeRoomForWrite(bool force) {
       return Status::IOError(s.message());
     }
     imm_ = std::move(mem_);
+    has_imm_ = true;
     mem_ = std::make_shared<MemTable>();
     log_ = std::move(new_log);
     log_number_ = number;
@@ -262,7 +278,7 @@ Status Engine::Write(const WriteOptions& options, WriteBatch* batch) {
   }
   s = InsertInto(*batch, mem_.get());
   if (!s.ok()) return s;
-  stat_user_bytes_ += batch->ApproximateSize();
+  stat_user_bytes_ += batch->user_bytes();
   last_visible_sequence_.store(last_sequence_, std::memory_order_release);
   return Status::OK();
 }
@@ -285,6 +301,16 @@ Status Engine::Flush() {
   if (!s.ok()) return s;
   std::unique_lock<std::mutex> l(mutex_);
   bg_done_cv_.wait(l, [&] { return imm_ == nullptr || !bg_error_.ok() || shutting_down_; });
+  return bg_error_;
+}
+
+Status Engine::CompactAll() {
+  Status s = Flush();
+  if (!s.ok()) return s;
+  std::unique_lock<std::mutex> l(mutex_);
+  manual_compaction_ = true;
+  bg_work_cv_.notify_one();
+  bg_done_cv_.wait(l, [&] { return !manual_compaction_ || !bg_error_.ok() || shutting_down_; });
   return bg_error_;
 }
 
@@ -323,24 +349,83 @@ Status Engine::Scan(const ReadOptions& options, size_t limit,
 
 // ---------------------------------------------------------------- background work
 
+bool Engine::NeedsCompaction() const {
+  return manual_compaction_ ||
+         versions_->current()->NumFiles(0) >= options_.l0_compaction_trigger;
+}
+
 void Engine::BackgroundLoop() {
   std::unique_lock<std::mutex> l(mutex_);
   while (true) {
-    bg_work_cv_.wait(l, [&] { return shutting_down_ || (bg_error_.ok() && imm_ != nullptr); });
+    bg_work_cv_.wait(l, [&] {
+      return shutting_down_ || (bg_error_.ok() && (imm_ != nullptr || NeedsCompaction()));
+    });
     if (shutting_down_) break;  // an unflushed imm_ is still in its WAL and is replayed on open
+    // Flush first: a waiting memtable blocks writers, a pending compaction does not (yet).
+    const bool flush = imm_ != nullptr;
+    const bool full = manual_compaction_;
     l.unlock();
-    Status s = FlushImmutable();
+    Status s = flush ? FlushImmutable() : DoCompaction(full);
     l.lock();
+    if (!flush && full) manual_compaction_ = false;
     if (!s.ok() && bg_error_.ok()) {
-      Log(LogLevel::kError, "background flush failed: " + s.ToString());
+      Log(LogLevel::kError, std::string(flush ? "flush" : "compaction") +
+                                " failed: " + s.ToString());
       bg_error_ = s;
     }
     bg_done_cv_.notify_all();
   }
 }
 
+Status Engine::DoCompaction(bool full) {
+  const uint64_t start = env_->NowMicros();
+  Compaction c;
+  {
+    std::lock_guard<std::mutex> l(mutex_);
+    c = PickCompaction(*versions_->current(), full);
+  }
+  if (c.empty()) return Status::OK();
+  // Called every few hundred entries. A long compaction must not starve writers waiting for a
+  // flush, so a pending memtable is flushed right here (into L0, which is not an input).
+  auto between_entries = [this] {
+    if (shutting_down_) return false;
+    if (has_imm_) {
+      Status s = FlushImmutable();
+      std::lock_guard<std::mutex> l(mutex_);
+      if (!s.ok() && bg_error_.ok()) bg_error_ = s;
+      bg_done_cv_.notify_all();
+      return s.ok();
+    }
+    return true;
+  };
+  CompactionResult result;
+  bool aborted = false;
+  Status s = RunCompaction(options_, env_, dbname_, versions_.get(), c, between_entries, &result,
+                           &aborted);
+  if (!s.ok() || aborted) return s;
+  Hook("compaction:before_install");
+  VersionEdit edit;
+  for (int level = 0; level < kNumLevels; level++) {
+    for (const auto& f : c.inputs[level]) edit.DeleteFile(level, f->number);
+  }
+  for (auto& meta : result.outputs) edit.AddFile(1, meta);
+  s = versions_->LogAndApply(&edit, last_visible_sequence_.load(std::memory_order_acquire),
+                             &mutex_);
+  if (!s.ok()) {
+    for (auto& meta : result.outputs) meta.table->MarkObsolete();  // never installed
+    return s;
+  }
+  Hook("compaction:after_install");
+  stat_compactions_++;
+  stat_compaction_bytes_read_ += c.InputBytes();
+  stat_compaction_bytes_written_ += result.bytes_written;
+  stat_compaction_micros_ += env_->NowMicros() - start;
+  return Status::OK();
+}
+
 Status Engine::FlushImmutable() {
   Hook("flush:begin");
+  const uint64_t start = env_->NowMicros();
   std::shared_ptr<MemTable> imm;
   uint64_t log_number;
   {
@@ -363,8 +448,10 @@ Status Engine::FlushImmutable() {
   {
     std::lock_guard<std::mutex> l(mutex_);
     imm_.reset();
+    has_imm_ = false;
   }
   stat_flushes_++;
+  stat_flush_micros_ += env_->NowMicros() - start;
   DeleteObsoleteFiles(/*at_open=*/false);
   return Status::OK();
 }
@@ -424,14 +511,25 @@ nlohmann::json Engine::Stats() {
   j["l1_files"] = version->NumFiles(1);
   j["l1_bytes"] = version->LevelBytes(1);
   j["last_sequence"] = last_visible_sequence_.load();
+  const uint64_t user = stat_user_bytes_.load();
+  const uint64_t flushed = stat_flush_bytes_.load();
+  const uint64_t compacted = stat_compaction_bytes_written_.load();
   j["flushes"] = stat_flushes_.load();
-  j["flush_bytes_written"] = stat_flush_bytes_.load();
-  j["user_bytes_written"] = stat_user_bytes_.load();
+  j["flush_bytes_written"] = flushed;
+  j["flush_micros"] = stat_flush_micros_.load();
+  j["compactions"] = stat_compactions_.load();
+  j["compaction_bytes_read"] = stat_compaction_bytes_read_.load();
+  j["compaction_bytes_written"] = compacted;
+  j["compaction_micros"] = stat_compaction_micros_.load();
+  j["user_bytes_written"] = user;
+  // SST bytes written by flush + compaction per byte of user key/value data.
+  j["write_amplification"] = user == 0 ? 0.0 : static_cast<double>(flushed + compacted) / user;
   j["bloom_checks"] = read_stats_.bloom_checks.load();
   j["bloom_useful"] = read_stats_.bloom_useful.load();
   j["stall_micros"] = stat_stall_micros_.load();
   j["block_cache_hits"] = cache_ ? cache_->hits() : 0;
   j["block_cache_misses"] = cache_ ? cache_->misses() : 0;
+  j["block_cache_evictions"] = cache_ ? cache_->evictions() : 0;
   return j;
 }
 

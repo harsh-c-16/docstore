@@ -68,6 +68,8 @@ class Engine {
 
   // Forces the memtable into an L0 SSTable and waits for it.
   Status Flush();
+  // Flushes, then merges every table into L1 (applying the CompactionFilter) and waits.
+  Status CompactAll();
 
   nlohmann::json Stats();
 
@@ -86,6 +88,9 @@ class Engine {
   // Background thread.
   void BackgroundLoop();
   Status FlushImmutable();
+  // Merges L0 (and overlapping L1, or everything if full) into L1.
+  Status DoCompaction(bool full);
+  bool NeedsCompaction() const;  // mutex_ held
   // Writes mem's newest entry per user key to a new L0 table. Leaves meta->table null if the
   // memtable is empty.
   Status WriteLevel0Table(const MemTable& mem, FileMeta* meta);
@@ -114,8 +119,11 @@ class Engine {
   std::shared_ptr<LogWriter> log_;
   uint64_t log_number_ = 0;  // WAL that receives writes after imm_ (the flush's log_number)
   Status bg_error_;
-  bool shutting_down_ = false;
+  bool manual_compaction_ = false;  // CompactAll() is waiting for a full compaction
   bool closed_ = false;
+  // Atomic so the compaction loop can poll them without the mutex (written under mutex_).
+  std::atomic<bool> shutting_down_{false};
+  std::atomic<bool> has_imm_{false};
   std::thread bg_thread_;
 
   // Highest sequence whose batch is fully in the memtable. Readers snapshot it (acquire);
@@ -126,6 +134,11 @@ class Engine {
   // Statistics.
   std::atomic<uint64_t> stat_flushes_{0};
   std::atomic<uint64_t> stat_flush_bytes_{0};
+  std::atomic<uint64_t> stat_flush_micros_{0};
+  std::atomic<uint64_t> stat_compactions_{0};
+  std::atomic<uint64_t> stat_compaction_bytes_read_{0};
+  std::atomic<uint64_t> stat_compaction_bytes_written_{0};
+  std::atomic<uint64_t> stat_compaction_micros_{0};
   ReadStats read_stats_;
   std::atomic<uint64_t> stat_stall_micros_{0};
   std::atomic<uint64_t> stat_user_bytes_{0};
