@@ -69,8 +69,10 @@ class EngineModel {
       }
     } else if (r < 96) {
       CheckScan();
-    } else if (r < 98) {
+    } else if (r < 97) {
       ASSERT_TRUE(engine_->Flush().ok());
+    } else if (r < 98) {
+      ASSERT_TRUE(engine_->CompactAll().ok());
     } else {
       Reopen();
     }

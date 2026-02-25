@@ -103,13 +103,20 @@ TEST_F(EngineTest, ReadsSpanMemtableAndTables) {
 }
 
 TEST_F(EngineTest, NoFileLeaksAfterAThousandFlushes) {
+  // Automatic compaction off so no background work races the file counts below; the second
+  // phase then checks the compaction path explicitly.
+  options_.l0_compaction_trigger = 100000;
+  options_.l0_slowdown_trigger = 100000;
+  options_.l0_stop_trigger = 100000;
+  Open();
   for (int i = 0; i < 1000; i++) {
     Put("key" + std::to_string(i % 50), "value" + std::to_string(i));
     ASSERT_TRUE(engine_->Flush().ok());
   }
-  auto check = [&] {
+  auto check = [&](int expected_tables) {
     auto stats = engine_->Stats();
     int tables = stats["l0_files"].get<int>() + stats["l1_files"].get<int>();
+    EXPECT_EQ(tables, expected_tables);
     EXPECT_EQ(static_cast<int>(Files(FileType::kTable).size()), tables);
     EXPECT_EQ(Files(FileType::kLog).size(), 1u);
     EXPECT_EQ(Files(FileType::kManifest).size(), 1u);
@@ -118,9 +125,11 @@ TEST_F(EngineTest, NoFileLeaksAfterAThousandFlushes) {
       EXPECT_EQ(Get("key" + std::to_string(k)), "value" + std::to_string(950 + k));
     }
   };
-  check();
+  check(1000);
+  ASSERT_TRUE(engine_->CompactAll().ok());
+  check(1);  // 1,000 inputs deleted once the compaction was installed
   Open();
-  check();
+  check(1);
 }
 
 TEST_F(EngineTest, ManyFlushesAndReopens) {
@@ -131,7 +140,8 @@ TEST_F(EngineTest, ManyFlushesAndReopens) {
     Open();
     for (int i = 0; i < 300; i++) ASSERT_EQ(Get("k" + std::to_string(i)), std::to_string(round));
   }
-  EXPECT_GT(engine_->Stats()["l0_files"].get<int>(), 1);
+  auto stats = engine_->Stats();
+  EXPECT_GE(stats["l0_files"].get<int>() + stats["l1_files"].get<int>(), 1);
 }
 
 TEST_F(EngineTest, TornTailInNewestWalIsDropped) {
@@ -307,6 +317,92 @@ TEST_F(EngineTest, ScanReportsCorruptionInsteadOfSkippingData) {
   std::string v;
   EXPECT_TRUE(engine_->Get("k10000", &v).IsCorruption());
   EXPECT_TRUE(engine_->Get("k11999", &v).ok());  // undamaged block
+}
+
+}  // namespace
+}  // namespace docstore::kv
+
+namespace docstore::kv {
+namespace {
+
+uint64_t TableBytes(const nlohmann::json& stats) {
+  return stats["l0_bytes"].get<uint64_t>() + stats["l1_bytes"].get<uint64_t>();
+}
+
+TEST_F(EngineTest, CompactAllMergesIntoL1AndDropsTombstones) {
+  for (int i = 0; i < 2000; i++) Put("k" + std::to_string(10000 + i), std::string(100, 'a'));
+  ASSERT_TRUE(engine_->Flush().ok());
+  for (int i = 0; i < 2000; i += 2) {
+    ASSERT_TRUE(engine_->Delete(WriteOptions(), "k" + std::to_string(10000 + i)).ok());
+  }
+  ASSERT_TRUE(engine_->CompactAll().ok());
+  auto stats = engine_->Stats();
+  EXPECT_EQ(stats["l0_files"], 0);
+  EXPECT_GE(stats["l1_files"].get<int>(), 1);
+  EXPECT_GE(stats["compactions"].get<int>(), 1);
+  EXPECT_GT(stats["write_amplification"].get<double>(), 0.0);
+  // Half the keys and every tombstone are gone, so L1 holds about half the original data.
+  EXPECT_LT(TableBytes(stats), 2000u * 100 * 6 / 10);
+  KVs out;
+  ASSERT_TRUE(engine_->Scan(ReadOptions(), 0, &out).ok());
+  ASSERT_EQ(out.size(), 1000u);
+  EXPECT_EQ(out[0].first, "k10001");
+  Open();
+  EXPECT_EQ(Get("k10000"), "NOT_FOUND");
+  EXPECT_EQ(Get("k10001"), std::string(100, 'a'));
+}
+
+TEST_F(EngineTest, OverwriteWorkloadShrinksOnDiskAfterCompaction) {
+  options_.memtable_size = 64 << 10;
+  options_.l0_compaction_trigger = 100;  // keep the automatic compactor out of the way
+  options_.l0_slowdown_trigger = 200;
+  options_.l0_stop_trigger = 300;
+  Open();
+  for (int round = 0; round < 10; round++) {
+    for (int i = 0; i < 1000; i++) Put("key" + std::to_string(i), std::string(200, 'a' + round));
+  }
+  ASSERT_TRUE(engine_->Flush().ok());
+  const uint64_t before = TableBytes(engine_->Stats());
+  ASSERT_TRUE(engine_->CompactAll().ok());
+  const uint64_t after = TableBytes(engine_->Stats());
+  EXPECT_LT(after * 5, before) << before << " -> " << after;  // ~10 versions -> 1
+  EXPECT_EQ(Get("key7"), std::string(200, 'j'));
+}
+
+TEST_F(EngineTest, AutomaticCompactionKeepsL0SmallAndCutsL1Files) {
+  options_.memtable_size = 16 << 10;
+  options_.target_file_size = 32 << 10;
+  Open();
+  for (int i = 0; i < 20000; i++) Put("k" + std::to_string(i % 3000), std::string(64, 'x'));
+  ASSERT_TRUE(engine_->Flush().ok());
+  auto stats = engine_->Stats();
+  EXPECT_GT(stats["compactions"].get<int>(), 0);
+  EXPECT_LT(stats["l0_files"].get<int>(), options_.l0_stop_trigger);
+  EXPECT_GT(stats["l1_files"].get<int>(), 3);  // ~3000 x 80 bytes cut at 32 KiB
+  KVs out;
+  ASSERT_TRUE(engine_->Scan(ReadOptions(), 0, &out).ok());
+  EXPECT_EQ(out.size(), 3000u);
+}
+
+class DropPrefixFilter : public CompactionFilter {
+ public:
+  bool ShouldDrop(std::string_view key) const override { return key.substr(0, 5) == "dead/"; }
+};
+
+TEST_F(EngineTest, CompactionFilterDropsKeys) {
+  options_.compaction_filter = std::make_shared<DropPrefixFilter>();
+  Open();
+  for (int i = 0; i < 100; i++) {
+    Put("dead/" + std::to_string(i), "x");
+    Put("live/" + std::to_string(i), "y");
+  }
+  EXPECT_EQ(Get("dead/5"), "x");  // the filter only acts during compaction
+  ASSERT_TRUE(engine_->CompactAll().ok());
+  EXPECT_EQ(Get("dead/5"), "NOT_FOUND");
+  EXPECT_EQ(Get("live/5"), "y");
+  KVs out;
+  ASSERT_TRUE(engine_->Scan(ReadOptions(), 0, &out).ok());
+  EXPECT_EQ(out.size(), 100u);
 }
 
 }  // namespace
