@@ -35,6 +35,9 @@ Status Engine::Open(const Options& options, const std::string& dbname,
   Status s = engine->Recover();
   if (!s.ok()) return s;
   engine->bg_thread_ = std::thread([e = engine.get()] { e->BackgroundLoop(); });
+  if (options.journal_commit_interval_ms > 0) {
+    engine->syncer_thread_ = std::thread([e = engine.get()] { e->SyncerLoop(); });
+  }
   *out = std::move(engine);
   return Status::OK();
 }
@@ -197,11 +200,32 @@ Status Engine::Close() {
   }
   bg_work_cv_.notify_all();
   bg_done_cv_.notify_all();
+  syncer_cv_.notify_all();
   if (bg_thread_.joinable()) bg_thread_.join();
+  if (syncer_thread_.joinable()) syncer_thread_.join();
   Status s;
   if (log_) s = log_->Sync();  // make sync=false writes durable on a clean shutdown
   lock_.reset();
   return s;
+}
+
+void Engine::SyncerLoop() {
+  const auto interval = std::chrono::milliseconds(options_.journal_commit_interval_ms);
+  std::unique_lock<std::mutex> l(mutex_);
+  while (!shutting_down_) {
+    syncer_cv_.wait_for(l, interval, [&] { return shutting_down_.load(); });
+    if (shutting_down_ || !bg_error_.ok()) continue;
+    std::shared_ptr<LogWriter> log = log_;  // keeps the WAL open even if it is rotated away
+    l.unlock();
+    // Runs concurrently with writers: LogWriter::Sync only holds the WAL mutex to flush the
+    // (already empty) buffer, and fdatasyncs outside it.
+    Status s = log->Sync();
+    stat_wal_syncs_++;
+    l.lock();
+    // A failed fsync cannot be retried safely (the kernel may have dropped the dirty pages),
+    // so it is fatal for writes, like a failed WAL append.
+    if (!s.ok() && bg_error_.ok()) bg_error_ = s;
+  }
 }
 
 // ---------------------------------------------------------------- write path
@@ -241,6 +265,7 @@ Status Engine::MakeRoomForWrite(bool force) {
     // Everything in the old WAL must be durable before any write lands in the new one;
     // otherwise power loss could keep a later (synced) write and lose an earlier one.
     Status s = old_log->Sync();
+    stat_wal_syncs_++;
     uint64_t number = 0;
     std::shared_ptr<LogWriter> new_log;
     if (s.ok()) s = NewLogFile(&number, &new_log);
@@ -269,7 +294,10 @@ Status Engine::Write(const WriteOptions& options, WriteBatch* batch) {
   last_sequence_ += batch->Count();
   // log_ and mem_ are only replaced by this thread (under write_mutex_), so no mutex_ needed.
   s = log_->AddRecord(batch->Contents());
-  if (s.ok() && options.sync) s = log_->Sync();
+  if (s.ok() && options.sync) {
+    s = log_->Sync();
+    stat_wal_syncs_++;
+  }
   if (!s.ok()) {
     // We no longer know what the WAL contains, so stop accepting writes until reopen.
     std::lock_guard<std::mutex> l(mutex_);
@@ -527,6 +555,7 @@ nlohmann::json Engine::Stats() {
   j["bloom_checks"] = read_stats_.bloom_checks.load();
   j["bloom_useful"] = read_stats_.bloom_useful.load();
   j["stall_micros"] = stat_stall_micros_.load();
+  j["wal_syncs"] = stat_wal_syncs_.load();
   j["block_cache_hits"] = cache_ ? cache_->hits() : 0;
   j["block_cache_misses"] = cache_ ? cache_->misses() : 0;
   j["block_cache_evictions"] = cache_ ? cache_->evictions() : 0;

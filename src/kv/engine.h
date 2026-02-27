@@ -85,6 +85,10 @@ class Engine {
   // Write path (write_mutex_ held). force=true rotates a non-empty memtable even if not full.
   Status MakeRoomForWrite(bool force);
 
+  // Syncer thread: fdatasyncs the WAL every journal_commit_interval_ms, which bounds how much
+  // sync=false data a power loss can take (MongoDB's journal commit interval).
+  void SyncerLoop();
+
   // Background thread.
   void BackgroundLoop();
   Status FlushImmutable();
@@ -114,6 +118,7 @@ class Engine {
   mutable std::mutex mutex_;
   std::condition_variable bg_work_cv_;  // wakes the background thread
   std::condition_variable bg_done_cv_;  // background work finished (stalled writers, Flush)
+  std::condition_variable syncer_cv_;   // wakes the syncer early on shutdown
   std::shared_ptr<MemTable> mem_;
   std::shared_ptr<MemTable> imm_;  // memtable being flushed, or null
   std::shared_ptr<LogWriter> log_;
@@ -125,6 +130,7 @@ class Engine {
   std::atomic<bool> shutting_down_{false};
   std::atomic<bool> has_imm_{false};
   std::thread bg_thread_;
+  std::thread syncer_thread_;
 
   // Highest sequence whose batch is fully in the memtable. Readers snapshot it (acquire);
   // the writer publishes a batch by storing it (release) after the memtable insert, so a
@@ -142,6 +148,7 @@ class Engine {
   ReadStats read_stats_;
   std::atomic<uint64_t> stat_stall_micros_{0};
   std::atomic<uint64_t> stat_user_bytes_{0};
+  std::atomic<uint64_t> stat_wal_syncs_{0};
 };
 
 }  // namespace docstore::kv
