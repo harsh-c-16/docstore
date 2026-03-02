@@ -53,12 +53,19 @@ find_package(Threads REQUIRED)
 target_link_libraries(docstore PUBLIC Threads::Threads)
 docstore_warnings(docstore)
 
+# ---- tools ----
+add_executable(crash_writer tools/crash_writer.cpp)
+target_link_libraries(crash_writer PRIVATE docstore)
+docstore_warnings(crash_writer)
+
 # ---- tests ----
 enable_testing()
 include(GoogleTest)
 file(GLOB_RECURSE DOCSTORE_TEST_SOURCES CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/*_test.cpp)
 add_executable(docstore_tests ${DOCSTORE_TEST_SOURCES})
-target_include_directories(docstore_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+target_include_directories(docstore_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests ${PROJECT_SOURCE_DIR}/tools)
+target_compile_definitions(docstore_tests PRIVATE CRASH_WRITER_PATH="$<TARGET_FILE:crash_writer>")
+add_dependencies(docstore_tests crash_writer)
 target_link_libraries(docstore_tests PRIVATE docstore GTest::gtest_main)
 docstore_warnings(docstore_tests)
 
