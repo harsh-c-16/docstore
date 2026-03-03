@@ -407,3 +407,21 @@ TEST_F(EngineTest, CompactionFilterDropsKeys) {
 
 }  // namespace
 }  // namespace docstore::kv
+
+namespace docstore::kv {
+namespace {
+
+// Regression: with the compaction trigger above the stop trigger, writers used to wait at the
+// stop trigger for a compaction that could never start.
+TEST_F(EngineTest, StopTriggerBelowCompactionTriggerDoesNotDeadlock) {
+  options_.memtable_size = 4 << 10;
+  options_.l0_compaction_trigger = 30;
+  options_.l0_slowdown_trigger = 2;
+  options_.l0_stop_trigger = 3;
+  Open();
+  for (int i = 0; i < 5000; i++) Put("k" + std::to_string(i % 500), std::string(50, 'v'));
+  EXPECT_GT(engine_->Stats()["compactions"].get<int>(), 0);
+}
+
+}  // namespace
+}  // namespace docstore::kv

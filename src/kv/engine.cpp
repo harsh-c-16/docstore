@@ -18,8 +18,21 @@
 
 namespace docstore::kv {
 
+namespace {
+
+// Writers stall at l0_stop_trigger until a compaction runs, so a compaction must start at or
+// before that point, or the stall would never end. Same rule RocksDB applies when sanitizing.
+Options SanitizeOptions(Options o) {
+  o.l0_compaction_trigger = std::max(o.l0_compaction_trigger, 1);
+  o.l0_slowdown_trigger = std::max(o.l0_slowdown_trigger, o.l0_compaction_trigger);
+  o.l0_stop_trigger = std::max(o.l0_stop_trigger, o.l0_slowdown_trigger);
+  return o;
+}
+
+}  // namespace
+
 Engine::Engine(const Options& options, std::string dbname)
-    : options_(options),
+    : options_(SanitizeOptions(options)),
       env_(options.env != nullptr ? options.env : Env::Default()),
       dbname_(std::move(dbname)),
       cache_(options.block_cache_bytes > 0 ? std::make_unique<BlockCache>(options.block_cache_bytes)
