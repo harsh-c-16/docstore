@@ -25,6 +25,9 @@ and every place the implementation deviates from its original requirements. It g
 | D17 | Write stalls follow LevelDB's order: (1) if L0 >= `l0_slowdown_trigger`, sleep 1 ms once per write; (2) if the memtable has room, proceed; (3) if a flush is pending or L0 >= `l0_stop_trigger`, wait; (4) otherwise rotate. | The requirements list the same three conditions without an order. Checking the stop trigger only when the memtable is full means writes keep flowing into memory while L0 is crowded; they only block when they would actually add another L0 file. |
 | D18 | A long compaction polls every 256 entries and, if a memtable is waiting, flushes it inline before continuing. | With one background thread, "flush before compaction" alone would let a multi-second compaction block writers that filled the new memtable. The inline flush goes to L0, which is not a compaction input, so it cannot interfere with the merge. |
 | D19 | `CompactAll()` flushes first and then compacts *every* file (L0 and all of L1). | Merging only L0 + overlapping L1 would leave L1 files untouched by the CompactionFilter; a full compaction is what reclaims a dropped collection everywhere. |
+| D20 | Options are sanitized at open so that `l0_compaction_trigger <= l0_slowdown_trigger <= l0_stop_trigger` (each raised to at least the previous one). | Otherwise writers can wait at the stop trigger for a compaction that will never be scheduled (a real deadlock found by the I/O error test). RocksDB applies the same rule. |
+| D21 | Any failed fsync (WAL syncer, `sync=true` write, rotation, flush, compaction, MANIFEST) sets `bg_error_`; the database becomes read-only until reopened. | After a failed fsync Linux may already have dropped the dirty pages and cleared the error, so a retry can "succeed" without the data being on disk (PostgreSQL's 2018 "fsyncgate"). Refusing further writes and recovering from the WAL on reopen is the only safe response. |
+| D22 | A write that returns an error may or may not survive a crash; tests accept recovered states that include the single in-flight failed write. | The WAL append can reach the kernel (or even the disk, via the syncer) before the error is returned. This is the same contract as any database: an error means "unknown", OK means "durable". |
 | D8 | The fault model is the strict POSIX worst case: after power loss a file holds exactly its last-synced prefix, and a create/rename/delete survives only if its directory was synced. | Real ext4 is usually kinder (e.g. it often persists the directory entry with the file), so a design that passes this model also passes on real disks; the reverse is not true. |
 
 ## Deviations from the original requirements
@@ -33,6 +36,43 @@ and every place the implementation deviates from its original requirements. It g
 |---|---|---|---|
 | X1 | a torn tail in the newest WAL is truncated at the last good record. | Recovery stops at the last good record and logs a warning, but does not truncate the file in place. | Open always flushes the recovered data to L0, writes a new MANIFEST and then deletes every replayed WAL, so the torn file is never appended to or read again. If Open crashes first, the next Open replays the same prefix. Truncation would be dead code. |
 
-## Lock order
+## Concurrency model and lock order
 
-To be written.
+**Threads.** Any number of caller threads (readers and writers), one background thread (flushes,
+then compactions), and one WAL syncer thread (every `journal_commit_interval_ms`).
+
+| Lock | Protects | Rules |
+|---|---|---|
+| `Engine::write_mutex_` | the whole engine write path: sequence assignment, WAL append/sync, memtable insert, memtable rotation; also `Flush`, `CompactAll`, `Close` | One writer at a time. Held across write stalls (writers queue behind it). Readers and the background threads never take it. |
+| `Engine::mutex_` | `mem_`, `imm_`, `log_`, `log_number_`, the current Version pointer (swapped by `VersionSet::LogAndApply`), `bg_error_`, `manual_compaction_`, `closed_` | Held only to copy or swap pointers and flags, **never during disk I/O**. Condition variables `bg_work_cv_`, `bg_done_cv_`, `syncer_cv_` wait on it. |
+| `LogWriter::mu_` | the WAL file's user-space buffer and byte count | `AddRecord` appends + flushes under it; `Sync` flushes under it and fdatasyncs **outside** it. |
+| `BlockCache::Shard::mu` (x16) | one LRU shard | Leaf lock: nothing is acquired while holding it. |
+| `MemEnv::mu_` -> `FileState::mu` | test filesystems only | Namespace lock before file lock. |
+
+**Lock order:** `write_mutex_` -> `mutex_` -> `LogWriter::mu_` -> cache shard. A thread never
+acquires a lock earlier in this list while holding a later one. In practice the write path holds
+`write_mutex_`, takes `mutex_` briefly for rotation, releases it, and only then does WAL I/O.
+(The document layer adds `Database::write_mutex_` and the catalog `shared_mutex` in front of
+this list; see below.)
+
+**Lock-free paths.**
+- Readers: `GetSnapshot()` copies `{mem_, imm_, Version, last_visible_sequence_}` under `mutex_`
+  and then reads with no lock at all. Memtables are read through the skiplist's acquire loads;
+  tables are immutable files read with `pread`.
+- `last_visible_sequence_`: stored with `memory_order_release` by the writer after the memtable
+  insert, loaded with `memory_order_acquire` by readers. This is what makes a batch visible
+  atomically.
+- `shutting_down_` and `has_imm_` are atomics so the compaction loop can poll them every 256
+  entries without the mutex. Statistics counters are relaxed atomics.
+
+**Why the background threads never deadlock with writers.** Writers wait on `bg_done_cv_` for
+exactly two things: a pending immutable memtable to be flushed, or L0 to drop below the stop
+trigger. The background thread never takes `write_mutex_`, flushes before compacting, flushes a
+waiting memtable even in the middle of a long compaction (D18), and options are sanitized so a
+compaction is always scheduled before the stop trigger (D20).
+
+**Shutdown.** `Close()` takes `write_mutex_` (waits for an in-flight write), sets `closed_` and
+`shutting_down_` under `mutex_`, notifies all condition variables, joins the background and syncer
+threads, then syncs the WAL. A compaction in progress sees `shutting_down_` within 256 entries,
+deletes its unfinished outputs and exits; an unflushed `imm_` is simply replayed from its WAL at
+the next open.
