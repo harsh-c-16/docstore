@@ -28,12 +28,16 @@ and every place the implementation deviates from its original requirements. It g
 | D20 | Options are sanitized at open so that `l0_compaction_trigger <= l0_slowdown_trigger <= l0_stop_trigger` (each raised to at least the previous one). | Otherwise writers can wait at the stop trigger for a compaction that will never be scheduled (a real deadlock found by the I/O error test). RocksDB applies the same rule. |
 | D21 | Any failed fsync (WAL syncer, `sync=true` write, rotation, flush, compaction, MANIFEST) sets `bg_error_`; the database becomes read-only until reopened. | After a failed fsync Linux may already have dropped the dirty pages and cleared the error, so a retry can "succeed" without the data being on disk (PostgreSQL's 2018 "fsyncgate"). Refusing further writes and recovering from the WAL on reopen is the only safe response. |
 | D22 | A write that returns an error may or may not survive a crash; tests accept recovered states that include the single in-flight failed write. | The WAL append can reach the kernel (or even the disk, via the syncer) before the error is returned. This is the same contract as any database: an error means "unknown", OK means "durable". |
+| D23 | `DropCollection`/`DropIndex` only remove the catalog entry (O(1)); the data is reclaimed later by compaction through `CatalogCompactionFilter`. Drops are written with `sync=true`, and the in-memory catalog changes only after the batch commits. | Deleting every key would cost O(collection size) of tombstones and block writers. Dropping by catalog is safe because ids are never reused (so the keys can never be written again, the filter contract) and because the filter only sees a drop once it is durable; otherwise compaction could durably erase data whose drop a power cut later undid. |
+| D24 | Documents are stored with `nlohmann::json::to_bson`/`from_bson`, and JSON numbers keep their JSON type (int64 or double) in BSON. | Writing our own BSON encoder adds code with no benefit; BSON gives typed numbers and a length-prefixed binary layout like MongoDB's. Values BSON cannot hold (uint64 above INT64_MAX, keys containing NUL) are rejected with InvalidArgument at the API boundary. |
+| D25 | The document layer has its own `Database::write_mutex_`, taken before the engine's `write_mutex_`. | Index maintenance needs read-modify-write across the old document and its index keys; the engine's mutex only covers a single `Write`. One extra uncontended lock per write is cheaper than exposing the engine mutex. |
 | D8 | The fault model is the strict POSIX worst case: after power loss a file holds exactly its last-synced prefix, and a create/rename/delete survives only if its directory was synced. | Real ext4 is usually kinder (e.g. it often persists the directory entry with the file), so a design that passes this model also passes on real disks; the reverse is not true. |
 
 ## Deviations from the original requirements
 
 | # | Requirement | What we do | Why |
 |---|---|---|---|
+| X2 | a generated `_id` is "inserted as the first field". | The public API uses `nlohmann::json`, whose objects keep keys sorted, so `_id` sits wherever it sorts (after upper-case names, before lower-case ones). | The requirements also fix the API type as `nlohmann::json`; field order is not observable in queries, and switching to `ordered_json` everywhere would change every signature. |
 | X1 | a torn tail in the newest WAL is truncated at the last good record. | Recovery stops at the last good record and logs a warning, but does not truncate the file in place. | Open always flushes the recovered data to L0, writes a new MANIFEST and then deletes every replayed WAL, so the torn file is never appended to or read again. If Open crashes first, the next Open replays the same prefix. Truncation would be dead code. |
 
 ## Concurrency model and lock order
@@ -48,12 +52,16 @@ then compactions), and one WAL syncer thread (every `journal_commit_interval_ms`
 | `LogWriter::mu_` | the WAL file's user-space buffer and byte count | `AddRecord` appends + flushes under it; `Sync` flushes under it and fdatasyncs **outside** it. |
 | `BlockCache::Shard::mu` (x16) | one LRU shard | Leaf lock: nothing is acquired while holding it. |
 | `MemEnv::mu_` -> `FileState::mu` | test filesystems only | Namespace lock before file lock. |
+| `Database::write_mutex_` | document-level read-modify-write (old doc, index keys, catalog) | One document writer at a time; taken before the engine's `write_mutex_` (D25). |
+| `CatalogHolder::mu_` (shared_mutex) | the `shared_ptr<const Catalog>` | Readers and the compaction filter take it shared to copy the pointer; the writer takes it exclusive to swap in a new catalog after commit. |
 
-**Lock order:** `write_mutex_` -> `mutex_` -> `LogWriter::mu_` -> cache shard. A thread never
+**Lock order:** `Database::write_mutex_` -> `CatalogHolder` shared_mutex -> `Engine::write_mutex_`
+-> `Engine::mutex_` -> `LogWriter::mu_` -> cache shard. A thread never
 acquires a lock earlier in this list while holding a later one. In practice the write path holds
 `write_mutex_`, takes `mutex_` briefly for rotation, releases it, and only then does WAL I/O.
-(The document layer adds `Database::write_mutex_` and the catalog `shared_mutex` in front of
-this list; see below.)
+The catalog `shared_mutex` is only held to copy or swap one `shared_ptr<const Catalog>`, never
+across an engine call, so in practice it never nests with the engine locks. The compaction filter
+(background thread, no engine lock held) takes it in shared mode.
 
 **Lock-free paths.**
 - Readers: `GetSnapshot()` copies `{mem_, imm_, Version, last_visible_sequence_}` under `mutex_`
