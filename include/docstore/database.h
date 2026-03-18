@@ -3,6 +3,8 @@
 // DocStore's public API: a single-node document database over the kv::Engine LSM tree.
 // No exceptions cross this API; every error is a Status.
 
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -24,6 +26,10 @@ struct Catalog;
 struct CollectionInfo;
 class CatalogHolder;
 }  // namespace doc
+
+struct FindOptions {
+  size_t limit = 0;  // 0 = no limit
+};
 
 class Database {
  public:
@@ -49,6 +55,18 @@ class Database {
   Status Delete(const std::string& coll, const std::string& id, const WriteOptions& options);
   Status Get(const std::string& coll, const std::string& id, nlohmann::json* out);
 
+  // filter: {} or {path: scalar | {$eq|$gt|$gte|$lt|$lte|$in: ...}, ...}. Uses an index when
+  // one fits. If explain is non-null it receives MongoDB-shaped plan + execution stats.
+  Status Find(const std::string& coll, const nlohmann::json& filter, const FindOptions& options,
+              std::vector<nlohmann::json>* out, nlohmann::json* explain = nullptr);
+  // Runs the query and returns only the explain output.
+  Status Explain(const std::string& coll, const nlohmann::json& filter, nlohmann::json* out);
+
+  // Builds the index from existing data; writes are blocked while it builds.
+  Status CreateIndex(const std::string& coll, const std::string& field_path);
+  Status DropIndex(const std::string& coll, const std::string& field_path);
+  Status ListIndexes(const std::string& coll, std::vector<std::string>* out);
+
   Status Flush();       // force memtable -> SSTable
   Status CompactAll();  // force a full compaction (also reclaims dropped collections)
   nlohmann::json Stats();
@@ -68,7 +86,14 @@ class Database {
                   const nlohmann::json* old_doc, const nlohmann::json* new_doc,
                   std::shared_ptr<const doc::Catalog> new_catalog, const WriteOptions& options);
 
+  // Index builds (index_manager.cpp). Caller holds write_mutex_.
+  Status BuildIndex(const std::string& coll, const std::string& field);
+  Status ResumeIndexBuilds();
+
   std::unique_ptr<kv::Engine> engine_;
+  std::function<void(std::string_view)> test_hook_;
+  std::atomic<uint64_t> collscans_{0};
+  std::atomic<uint64_t> ixscans_{0};
   std::shared_ptr<doc::CatalogHolder> catalog_;
   // Serializes document writes, including their read-modify-write of the old document and its
   // index entries. Taken before the engine's own write mutex (DESIGN.md, lock order).

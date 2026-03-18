@@ -2,10 +2,14 @@
 
 #include "doc/bson_codec.h"
 #include "doc/catalog.h"
+#include "doc/executor.h"
+#include "doc/index_manager.h"
 #include "doc/keys.h"
 #include "doc/objectid.h"
 #include "doc/update_ops.h"
 #include "kv/engine.h"
+
+#include <chrono>
 
 namespace docstore {
 
@@ -36,6 +40,10 @@ Status Database::Open(const Options& options, const std::string& path,
   }
   if (!s.ok()) return s;
   db->catalog_->Set(std::move(catalog));
+  db->test_hook_ = options.test_hook;
+  // An index still "building" was interrupted by a crash: rebuild it before serving queries.
+  s = db->ResumeIndexBuilds();
+  if (!s.ok()) return s;
   *out = std::move(db);
   return Status::OK();
 }
@@ -68,8 +76,9 @@ Status Database::ReadDoc(uint32_t coll_id, const std::string& id, json* out) {
 Status Database::WriteDoc(const CollectionInfo& coll, const std::string& id, const json* old_doc,
                           const json* new_doc, std::shared_ptr<const Catalog> new_catalog,
                           const WriteOptions& options) {
-  (void)old_doc;  // index maintenance will use it
   kv::WriteBatch batch;
+  // The document and all its index entries change in one batch: atomically.
+  doc::UpdateIndexEntries(coll, id, old_doc, new_doc, &batch);
   const std::string key = doc::DocKey(coll.id, id);
   if (new_doc == nullptr) {
     batch.Delete(key);
@@ -110,7 +119,8 @@ Status Database::DropCollection(const std::string& coll) {
 
 Status Database::ListCollections(std::vector<std::string>* out) {
   out->clear();
-  for (const auto& [name, c] : CurrentCatalog()->collections) out->push_back(name);
+  const auto catalog = CurrentCatalog();  // keep it alive for the loop
+  for (const auto& [name, c] : catalog->collections) out->push_back(name);
   return Status::OK();
 }
 
@@ -209,6 +219,45 @@ Status Database::Get(const std::string& coll, const std::string& id, json* out) 
   return ReadDoc(info->id, id, out);
 }
 
+// ---------------------------------------------------------------- queries
+
+Status Database::Find(const std::string& coll, const json& filter_json, const FindOptions& options,
+                      std::vector<json>* out, json* explain) {
+  out->clear();
+  doc::Filter filter;
+  Status s = doc::ParseFilter(filter_json, &filter);
+  if (!s.ok()) return s;
+  const auto start = std::chrono::steady_clock::now();
+  const auto catalog = CurrentCatalog();
+  const CollectionInfo* info = catalog->Find(coll);
+  doc::Plan plan;
+  doc::ExecutionStats stats;
+  if (info != nullptr) {
+    plan = doc::ChoosePlan(*info, filter);
+    // One snapshot for the whole query: index entries and documents agree with each other.
+    s = doc::Execute(*engine_->GetSnapshot(), info->id, filter, plan, options.limit, out, &stats);
+    if (!s.ok()) return s;
+  }
+  (plan.collscan ? collscans_ : ixscans_)++;
+  if (explain != nullptr) {
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+    *explain = {{"queryPlanner", doc::DescribePlan(plan, filter_json)},
+                {"executionStats",
+                 {{"nReturned", stats.returned},
+                  {"totalKeysExamined", stats.keys_examined},
+                  {"totalDocsExamined", stats.docs_examined},
+                  {"executionTimeMillis", millis}}}};
+  }
+  return Status::OK();
+}
+
+Status Database::Explain(const std::string& coll, const json& filter, json* out) {
+  std::vector<json> docs;
+  return Find(coll, filter, FindOptions(), &docs, out);
+}
+
 // ---------------------------------------------------------------- maintenance
 
 Status Database::Flush() { return engine_->Flush(); }
@@ -218,6 +267,8 @@ Status Database::CompactAll() { return engine_->CompactAll(); }
 json Database::Stats() {
   json j = engine_->Stats();
   j["collections"] = CurrentCatalog()->collections.size();
+  j["queries_collscan"] = collscans_.load();
+  j["queries_ixscan"] = ixscans_.load();
   return j;
 }
 
