@@ -54,7 +54,7 @@ target_link_libraries(docstore PUBLIC Threads::Threads)
 docstore_warnings(docstore)
 
 # ---- tools ----
-foreach(tool crash_writer docstore_cli docstore_server)
+foreach(tool crash_writer docstore_cli docstore_server docstore_bench)
   add_executable(${tool} tools/${tool}.cpp)
   target_link_libraries(${tool} PRIVATE docstore)
   docstore_warnings(${tool})
