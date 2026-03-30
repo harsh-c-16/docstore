@@ -231,8 +231,8 @@ class PosixEnv final : public Env {
     if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
       int err = errno;
       ::close(fd);
-      return Status::IOError(path + ": database is locked by another user (" +
-                             std::strerror(err) + ")");
+      return Status::IOError(path + ": database is locked by another user (" + std::strerror(err) +
+                             ")");
     }
     *lock = std::make_unique<PosixFileLock>(fd);
     return Status::OK();

@@ -33,9 +33,12 @@ TEST_F(CommandHandlerTest, EveryOpEndToEnd) {
   json r = Run(R"({"op": "insert", "coll": "users", "doc": {"name": "Asha", "age": 21}})");
   ASSERT_EQ(r["ok"], 1);
   const std::string id = r["insertedId"];
-  EXPECT_EQ(Run(R"({"op": "upsert", "coll": "users", "doc": {"_id": "u2", "age": 30}, "sync": true})")["ok"], 1);
-  json u = handler_->Handle({{"op", "update"}, {"coll", "users"}, {"id", id},
-                             {"update", {{"$inc", {{"age", 1}}}}}});
+  EXPECT_EQ(
+      Run(R"({"op": "upsert", "coll": "users", "doc": {"_id": "u2", "age": 30}, "sync": true})")
+          ["ok"],
+      1);
+  json u = handler_->Handle(
+      {{"op", "update"}, {"coll", "users"}, {"id", id}, {"update", {{"$inc", {{"age", 1}}}}}});
   EXPECT_EQ(u["ok"], 1);
   json g = handler_->Handle({{"op", "get"}, {"coll", "users"}, {"id", id}});
   EXPECT_EQ(g["doc"]["age"], 22);
@@ -61,9 +64,10 @@ TEST_F(CommandHandlerTest, ErrorsAreResponsesNotCrashes) {
   EXPECT_EQ(code(R"({"op": "insert", "coll": "c", "doc": {"_id": "x"}})"), "DuplicateKey");
   EXPECT_EQ(code(R"({"op": "bogus"})"), "InvalidArgument");
   EXPECT_EQ(code(R"({"no_op": 1})"), "InvalidArgument");
-  EXPECT_EQ(code(R"({"op": "get", "coll": "c"})"), "InvalidArgument");          // missing id
+  EXPECT_EQ(code(R"({"op": "get", "coll": "c"})"), "InvalidArgument");           // missing id
   EXPECT_EQ(code(R"({"op": "get", "coll": 5, "id": "x"})"), "InvalidArgument");  // wrong type
-  EXPECT_EQ(code(R"({"op": "find", "coll": "c", "filter": {"a": {"$where": 1}}})"), "InvalidArgument");
+  EXPECT_EQ(code(R"({"op": "find", "coll": "c", "filter": {"a": {"$where": 1}}})"),
+            "InvalidArgument");
   json bad = json::parse(handler_->HandleLine("{not json"));
   EXPECT_EQ(bad["ok"], 0);
   EXPECT_EQ(bad["code"], "InvalidArgument");

@@ -73,7 +73,8 @@ Status Database::BuildIndex(const std::string& coll, const std::string& field) {
   const std::string coll_prefix = doc::CollectionPrefix(info->id);
   // Step 2: scan the collection and write index keys in batches of ~1,000. The write mutex is
   // held, so no document can change during the build (writes are blocked: a documented limit).
-  auto it = engine_->GetSnapshot()->NewIterator(kv::ReadOptions{coll_prefix, doc::PrefixEnd(coll_prefix)});
+  auto it = engine_->GetSnapshot()->NewIterator(
+      kv::ReadOptions{coll_prefix, doc::PrefixEnd(coll_prefix)});
   kv::WriteBatch batch;
   for (; it->Valid(); it->Next()) {
     nlohmann::json d;

@@ -23,13 +23,26 @@ std::string Enc(const json& v) {
 }
 
 TEST(KeyCodecTest, NumberOrderMatchesValueOrder) {
-  std::vector<double> values = {-std::numeric_limits<double>::infinity(), -DBL_MAX, -1e300, -2.5,
-                                -1, -DBL_MIN, -4.9e-324, 0.0, 4.9e-324, DBL_MIN, 1, 2.5, 1e300,
-                                DBL_MAX, std::numeric_limits<double>::infinity()};
+  std::vector<double> values = {-std::numeric_limits<double>::infinity(),
+                                -DBL_MAX,
+                                -1e300,
+                                -2.5,
+                                -1,
+                                -DBL_MIN,
+                                -4.9e-324,
+                                0.0,
+                                4.9e-324,
+                                DBL_MIN,
+                                1,
+                                2.5,
+                                1e300,
+                                DBL_MAX,
+                                std::numeric_limits<double>::infinity()};
   Random rnd(7);
   for (int i = 0; i < 2000; i++) {
     double sign = rnd.OneIn(2) ? -1 : 1;
-    values.push_back(sign * std::ldexp(static_cast<double>(rnd.Next() >> 11), static_cast<int>(rnd.Uniform(200)) - 100));
+    values.push_back(sign * std::ldexp(static_cast<double>(rnd.Next() >> 11),
+                                       static_cast<int>(rnd.Uniform(200)) - 100));
     values.push_back(static_cast<double>(static_cast<int64_t>(rnd.Next() % 2000000) - 1000000));
   }
   for (size_t i = 0; i < values.size(); i++) {
@@ -47,10 +60,19 @@ TEST(KeyCodecTest, NumberOrderMatchesValueOrder) {
 }
 
 TEST(KeyCodecTest, StringOrderWithEmbeddedNulsAndTypeOrder) {
-  std::vector<std::string> strings = {"",   std::string("\0", 1), std::string("\0\0", 2),
-                                      std::string("\0\x01", 2), "\x01", "a",
-                                      std::string("a\0", 2), std::string("a\0b", 3), "a\x01",
-                                      "ab", "b", "\xff", "\xff\xff"};
+  std::vector<std::string> strings = {"",
+                                      std::string("\0", 1),
+                                      std::string("\0\0", 2),
+                                      std::string("\0\x01", 2),
+                                      "\x01",
+                                      "a",
+                                      std::string("a\0", 2),
+                                      std::string("a\0b", 3),
+                                      "a\x01",
+                                      "ab",
+                                      "b",
+                                      "\xff",
+                                      "\xff\xff"};
   std::sort(strings.begin(), strings.end());
   for (size_t i = 0; i + 1 < strings.size(); i++) {
     ASSERT_LT(Enc(strings[i]), Enc(strings[i + 1])) << i;
@@ -95,7 +117,7 @@ TEST(MatcherTest, Semantics) {
   auto m = [&](const char* f) { return Matches(Parse(f), doc); };
   EXPECT_TRUE(m(R"({})"));
   EXPECT_TRUE(m(R"({"age": 21})"));
-  EXPECT_TRUE(m(R"({"age": 21.0})"));  // numbers compare as doubles
+  EXPECT_TRUE(m(R"({"age": 21.0})"));   // numbers compare as doubles
   EXPECT_FALSE(m(R"({"age": "21"})"));  // a string never equals a number
   EXPECT_TRUE(m(R"({"age": {"$gte": 18, "$lt": 30}})"));
   EXPECT_FALSE(m(R"({"age": {"$gt": 21}})"));
@@ -124,13 +146,14 @@ TEST(MatcherTest, InvalidFilters) {
 }
 
 TEST(PlannerTest, PriorityTieBreakAndBounds) {
-  CollectionInfo coll{"c", 1, {{"age", 2, true}, {"city", 3, true}, {"name", 4, true},
-                               {"zip", 5, false}}};
+  CollectionInfo coll{
+      "c", 1, {{"age", 2, true}, {"city", 3, true}, {"name", 4, true}, {"zip", 5, false}}};
   auto plan = [&](const char* f) { return ChoosePlan(coll, Parse(f)); };
   EXPECT_TRUE(plan(R"({"other": 1})").collscan);
   EXPECT_TRUE(plan(R"({"zip": 1})").collscan);  // building indexes are never used
   EXPECT_EQ(plan(R"({"age": {"$gt": 1}, "name": "x"})").field, "name");  // $eq beats range
-  EXPECT_EQ(plan(R"({"age": {"$in": [1]}, "name": {"$lt": "x"}})").field, "age");  // $in beats range
+  EXPECT_EQ(plan(R"({"age": {"$in": [1]}, "name": {"$lt": "x"}})").field,
+            "age");                                            // $in beats range
   EXPECT_EQ(plan(R"({"name": 1, "city": 2})").field, "city");  // tie: smallest field name
   Plan in = plan(R"({"age": {"$in": [3, 1, 3, 2]}})");
   ASSERT_EQ(in.ranges.size(), 3u);  // distinct, sorted

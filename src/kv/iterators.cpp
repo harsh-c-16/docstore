@@ -75,10 +75,9 @@ class LevelIterator final : public Iterator {
   }
   void Seek(std::string_view target) override {
     // First file whose largest key >= target; earlier files end before it.
-    auto it = std::lower_bound(files_->begin(), files_->end(), target,
-                               [](const auto& f, std::string_view t) {
-                                 return CompareInternalKeys(f->largest, t) < 0;
-                               });
+    auto it = std::lower_bound(
+        files_->begin(), files_->end(), target,
+        [](const auto& f, std::string_view t) { return CompareInternalKeys(f->largest, t) < 0; });
     OpenFile(static_cast<size_t>(it - files_->begin()));
     if (table_iter_) table_iter_->Seek(target);
     SkipExhaustedFiles();
@@ -153,7 +152,7 @@ class DBIterator final : public Iterator {
         status_ = Status::Corruption("bad internal key in scan");
         return;
       }
-      if (p.sequence > snapshot_) continue;  // written after this snapshot
+      if (p.sequence > snapshot_) continue;                // written after this snapshot
       if (has_skip_ && p.user_key == skip_key_) continue;  // older version of a decided key
       if (!upper_.empty() && p.user_key >= std::string_view(upper_)) return;
       skip_key_.assign(p.user_key);
@@ -187,9 +186,9 @@ std::unique_ptr<Iterator> NewLevelIterator(
   return std::make_unique<LevelIterator>(files);
 }
 
-std::unique_ptr<Iterator> NewDBIterator(std::unique_ptr<Iterator> internal,
-                                        SequenceNumber snapshot, std::string lower,
-                                        std::string upper, std::shared_ptr<const void> pin) {
+std::unique_ptr<Iterator> NewDBIterator(std::unique_ptr<Iterator> internal, SequenceNumber snapshot,
+                                        std::string lower, std::string upper,
+                                        std::shared_ptr<const void> pin) {
   return std::make_unique<DBIterator>(std::move(internal), snapshot, std::move(lower),
                                       std::move(upper), std::move(pin));
 }

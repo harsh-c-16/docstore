@@ -115,11 +115,10 @@ Plan ChoosePlan(const CollectionInfo& coll, const Filter& filter) {
     // One scan per distinct value, in key order, so results come out in (value, _id) order.
     std::sort(plan.ranges.begin(), plan.ranges.end(),
               [](const ScanRange& a, const ScanRange& b) { return a.lower < b.lower; });
-    plan.ranges.erase(std::unique(plan.ranges.begin(), plan.ranges.end(),
-                                  [](const ScanRange& a, const ScanRange& b) {
-                                    return a.lower == b.lower;
-                                  }),
-                      plan.ranges.end());
+    plan.ranges.erase(
+        std::unique(plan.ranges.begin(), plan.ranges.end(),
+                    [](const ScanRange& a, const ScanRange& b) { return a.lower == b.lower; }),
+        plan.ranges.end());
   } else {
     plan.ranges.push_back(RangeFor(prefix, *best_pred));
   }

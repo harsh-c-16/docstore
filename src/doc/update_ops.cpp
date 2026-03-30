@@ -39,8 +39,8 @@ Status Parent(json* doc, const std::vector<std::string>& path, bool create, json
         *parent = nullptr;
         return Status::OK();
       }
-      return Status::InvalidArgument("cannot create field '" + path[i + 1] + "' inside non-object '" +
-                                     path[i] + "'");
+      return Status::InvalidArgument("cannot create field '" + path[i + 1] +
+                                     "' inside non-object '" + path[i] + "'");
     }
   }
   *parent = cur;

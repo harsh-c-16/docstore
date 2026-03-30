@@ -8,8 +8,10 @@ Status SplitPath(std::string_view path, std::vector<std::string>* segments) {
   while (true) {
     size_t dot = path.find('.', start);
     std::string_view seg = path.substr(start, dot == std::string_view::npos ? dot : dot - start);
-    if (seg.empty()) return Status::InvalidArgument("empty segment in field path '" + std::string(path) + "'");
-    if (seg[0] == '$') return Status::InvalidArgument("field path segment starts with '$': " + std::string(path));
+    if (seg.empty())
+      return Status::InvalidArgument("empty segment in field path '" + std::string(path) + "'");
+    if (seg[0] == '$')
+      return Status::InvalidArgument("field path segment starts with '$': " + std::string(path));
     segments->emplace_back(seg);
     if (dot == std::string_view::npos) return Status::OK();
     start = dot + 1;

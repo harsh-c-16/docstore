@@ -23,10 +23,14 @@ bool ParseOp(const std::string& name, Op* op) {
 }
 
 bool Kind(const json& v, int* kind) {
-  if (v.is_number()) *kind = 0;
-  else if (v.is_string()) *kind = 1;
-  else if (v.is_boolean()) *kind = 2;
-  else return false;
+  if (v.is_number())
+    *kind = 0;
+  else if (v.is_string())
+    *kind = 1;
+  else if (v.is_boolean())
+    *kind = 2;
+  else
+    return false;
   return true;
 }
 

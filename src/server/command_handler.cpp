@@ -22,9 +22,7 @@ json FromStatus(const Status& s, json extra = json::object()) {
 // Throws json::exception (caught in Handle) when the field is missing or has the wrong type.
 std::string Str(const json& req, const char* field) { return req.at(field).get<std::string>(); }
 
-WriteOptions WriteOpts(const json& req) {
-  return WriteOptions{.sync = req.value("sync", false)};
-}
+WriteOptions WriteOpts(const json& req) { return WriteOptions{.sync = req.value("sync", false)}; }
 
 }  // namespace
 
@@ -47,12 +45,14 @@ json CommandHandler::Handle(const json& req) {
       Status s = db_->Insert(Str(req, "coll"), req.at("doc"), WriteOpts(req), &id);
       return FromStatus(s, {{"insertedId", id}});
     }
-    if (op == "upsert") return FromStatus(db_->Upsert(Str(req, "coll"), req.at("doc"), WriteOpts(req)));
+    if (op == "upsert")
+      return FromStatus(db_->Upsert(Str(req, "coll"), req.at("doc"), WriteOpts(req)));
     if (op == "update") {
       return FromStatus(
           db_->Update(Str(req, "coll"), Str(req, "id"), req.at("update"), WriteOpts(req)));
     }
-    if (op == "delete") return FromStatus(db_->Delete(Str(req, "coll"), Str(req, "id"), WriteOpts(req)));
+    if (op == "delete")
+      return FromStatus(db_->Delete(Str(req, "coll"), Str(req, "id"), WriteOpts(req)));
     if (op == "get") {
       json doc;
       Status s = db_->Get(Str(req, "coll"), Str(req, "id"), &doc);
@@ -91,7 +91,8 @@ json CommandHandler::Handle(const json& req) {
 
 std::string CommandHandler::HandleLine(std::string_view line) {
   json req = json::parse(line.begin(), line.end(), nullptr, /*allow_exceptions=*/false);
-  if (req.is_discarded()) return ErrorResponse(Status::InvalidArgument("request is not valid JSON")).dump();
+  if (req.is_discarded())
+    return ErrorResponse(Status::InvalidArgument("request is not valid JSON")).dump();
   // error_handler_t::replace: invalid UTF-8 inside strings must not throw while serializing.
   return Handle(req).dump(-1, ' ', false, json::error_handler_t::replace);
 }

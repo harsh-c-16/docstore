@@ -27,8 +27,8 @@ std::unique_ptr<Iterator> NewLevelIterator(
 
 // `pin` keeps whatever the internal iterator reads from (memtables, Version) alive.
 // An empty upper bound means unbounded.
-std::unique_ptr<Iterator> NewDBIterator(std::unique_ptr<Iterator> internal,
-                                        SequenceNumber snapshot, std::string lower,
-                                        std::string upper, std::shared_ptr<const void> pin);
+std::unique_ptr<Iterator> NewDBIterator(std::unique_ptr<Iterator> internal, SequenceNumber snapshot,
+                                        std::string lower, std::string upper,
+                                        std::shared_ptr<const void> pin);
 
 }  // namespace docstore::kv

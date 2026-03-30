@@ -116,12 +116,12 @@ TEST(StressTest, ScansSeeWholeBatchesAndMonotonicVersions) {
   EXPECT_EQ(errors.load(), 0u) << msg;
   EXPECT_GT(stats["flushes"].get<int>(), 0);
   EXPECT_GT(stats["compactions"].get<int>(), 0);
-  std::printf("stress: %llu batches x %d keys, %llu scans, %llu gets, %d flushes, %d compactions, "
-              "0 inconsistent reads\n",
-              static_cast<unsigned long long>(batches.load()), kKeys,
-              static_cast<unsigned long long>(scans.load()),
-              static_cast<unsigned long long>(gets.load()), stats["flushes"].get<int>(),
-              stats["compactions"].get<int>());
+  std::printf(
+      "stress: %llu batches x %d keys, %llu scans, %llu gets, %d flushes, %d compactions, "
+      "0 inconsistent reads\n",
+      static_cast<unsigned long long>(batches.load()), kKeys,
+      static_cast<unsigned long long>(scans.load()), static_cast<unsigned long long>(gets.load()),
+      stats["flushes"].get<int>(), stats["compactions"].get<int>());
 }
 
 }  // namespace

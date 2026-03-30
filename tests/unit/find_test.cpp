@@ -17,9 +17,10 @@ class FindTest : public ::testing::Test {
     options_.env = &env_;
     Open();
     for (int i = 0; i < 1000; i++) {
-      json doc{{"_id", "u" + std::to_string(i)}, {"age", i % 100}, {"city", i % 2 ? "Pune" : "Goa"}};
-      if (i % 10 == 0) doc.erase("age");          // sparse: no index entry
-      if (i % 7 == 0) doc["age"] = "unknown";     // strings sort after numbers
+      json doc{
+          {"_id", "u" + std::to_string(i)}, {"age", i % 100}, {"city", i % 2 ? "Pune" : "Goa"}};
+      if (i % 10 == 0) doc.erase("age");       // sparse: no index entry
+      if (i % 7 == 0) doc["age"] = "unknown";  // strings sort after numbers
       ASSERT_TRUE(db_->Insert("users", doc, {}, nullptr).ok());
     }
   }
@@ -115,7 +116,8 @@ TEST_F(FindTest, InLimitOrderAndTypeBrackets) {
   for (const auto& d : strings) EXPECT_EQ(d["age"], "unknown");
   json bad;
   std::vector<json> out;
-  EXPECT_TRUE(db_->Find("users", json::parse(R"({"age": {"$ne": 1}})"), {}, &out).IsInvalidArgument());
+  EXPECT_TRUE(
+      db_->Find("users", json::parse(R"({"age": {"$ne": 1}})"), {}, &out).IsInvalidArgument());
   EXPECT_TRUE(db_->Find("nocoll", json::object(), {}, &out).ok());
   EXPECT_TRUE(out.empty());
   ASSERT_TRUE(db_->Explain("users", json::parse(R"({"city": "Goa"})"), &bad).ok());
@@ -124,8 +126,9 @@ TEST_F(FindTest, InLimitOrderAndTypeBrackets) {
 
 TEST_F(FindTest, InterruptedIndexBuildIsRebuiltOnOpen) {
   for (int i = 1000; i < 5000; i++) {  // enough documents for several build batches
-    ASSERT_TRUE(db_->Insert("users", json{{"_id", "u" + std::to_string(i)}, {"age", i % 100}}, {},
-                            nullptr).ok());
+    ASSERT_TRUE(
+        db_->Insert("users", json{{"_id", "u" + std::to_string(i)}, {"age", i % 100}}, {}, nullptr)
+            .ok());
   }
   ASSERT_TRUE(db_->Flush().ok());
   int batches = 0;

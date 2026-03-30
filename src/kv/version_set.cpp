@@ -56,8 +56,9 @@ std::shared_ptr<const Version> VersionSet::Apply(const Version& base,
   auto v = std::make_shared<Version>();
   for (int level = 0; level < kNumLevels; level++) {
     for (const auto& f : base.files[level]) {
-      bool deleted = std::any_of(edit.deleted_files.begin(), edit.deleted_files.end(),
-                                 [&](const auto& d) { return d.first == level && d.second == f->number; });
+      bool deleted =
+          std::any_of(edit.deleted_files.begin(), edit.deleted_files.end(),
+                      [&](const auto& d) { return d.first == level && d.second == f->number; });
       if (!deleted) v->files[level].push_back(f);
     }
   }

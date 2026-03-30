@@ -36,10 +36,9 @@ std::string GenerateObjectId() {
   {
     // The lock keeps (seconds, counter) pairs in order across threads.
     std::lock_guard<std::mutex> l(mu);
-    const auto secs = static_cast<uint32_t>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    const auto secs = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                                                std::chrono::system_clock::now().time_since_epoch())
+                                                .count());
     const uint32_t count = st.counter.fetch_add(1) & 0xFFFFFF;
     for (int i = 0; i < 4; i++) bytes[i] = static_cast<uint8_t>(secs >> (24 - 8 * i));
     for (int i = 0; i < 5; i++) bytes[4 + i] = st.random[i];

@@ -79,7 +79,9 @@ json ToRequest(const std::string& line, std::string* error) {
   if (cmd == "indexes") return {{"op", "listIndexes"}, {"coll", need("collection")}};
   if (cmd == "index" || cmd == "dropindex") {
     std::string coll = need("collection");
-    return {{"op", cmd == "index" ? "createIndex" : "dropIndex"}, {"coll", coll}, {"field", need("field")}};
+    return {{"op", cmd == "index" ? "createIndex" : "dropIndex"},
+            {"coll", coll},
+            {"field", need("field")}};
   }
   if (cmd == "insert" || cmd == "upsert") {
     std::string coll = need("collection");

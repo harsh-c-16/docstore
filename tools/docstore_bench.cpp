@@ -199,14 +199,18 @@ class Bench {
       auto t0 = Clock::now();
       docstore::Status s = e->Get(k, &v);
       r.latencies_ns.push_back((Clock::now() - t0).count());
-      if (s.ok()) found++;
-      else if (!s.IsNotFound()) Die(s);
+      if (s.ok())
+        found++;
+      else if (!s.IsNotFound())
+        Die(s);
     }
     r.seconds = std::chrono::duration<double>(Clock::now() - start).count();
     r.ops = n;
     r.bytes = found * (16 + value_.size());
     json after = e->Stats();
-    auto delta = [&](const char* f) { return after[f].get<uint64_t>() - before[f].get<uint64_t>(); };
+    auto delta = [&](const char* f) {
+      return after[f].get<uint64_t>() - before[f].get<uint64_t>();
+    };
     std::ostringstream notes;
     notes << "found " << found << "/" << n << "; " << Layout() << "; bloom checks "
           << delta("bloom_checks") << ", bloom-avoided reads " << delta("bloom_useful")
@@ -237,7 +241,10 @@ class Bench {
 
   Result Scan() {
     auto* e = Engine();
-    { auto warm = e->NewIterator({}); for (int i = 0; warm->Valid() && i < 100000; i++) warm->Next(); }
+    {
+      auto warm = e->NewIterator({});
+      for (int i = 0; warm->Valid() && i < 100000; i++) warm->Next();
+    }
     Result r;
     auto start = Clock::now();
     auto it = e->NewIterator({});
@@ -265,16 +272,15 @@ class Bench {
     double compact_s = std::chrono::duration<double>(Clock::now() - c0).count();
     uint64_t disk_after = DirBytes(flags_.db);
     char notes[512];
-    std::snprintf(notes, sizeof(notes),
-                  "write amplification %.2f (fill + overwrite: SST bytes flushed %.0f MiB + "
-                  "compacted %.0f MiB / user bytes %.0f MiB); %d compactions; stall %.2f s; "
-                  "disk %.1f MiB before CompactAll -> %.1f MiB after (%.1f s)",
-                  st["write_amplification"].get<double>(),
-                  Mib(st["flush_bytes_written"].get<uint64_t>()),
-                  Mib(st["compaction_bytes_written"].get<uint64_t>()),
-                  Mib(st["user_bytes_written"].get<uint64_t>()), st["compactions"].get<int>(),
-                  st["stall_micros"].get<uint64_t>() / 1e6, Mib(disk_before), Mib(disk_after),
-                  compact_s);
+    std::snprintf(
+        notes, sizeof(notes),
+        "write amplification %.2f (fill + overwrite: SST bytes flushed %.0f MiB + "
+        "compacted %.0f MiB / user bytes %.0f MiB); %d compactions; stall %.2f s; "
+        "disk %.1f MiB before CompactAll -> %.1f MiB after (%.1f s)",
+        st["write_amplification"].get<double>(), Mib(st["flush_bytes_written"].get<uint64_t>()),
+        Mib(st["compaction_bytes_written"].get<uint64_t>()),
+        Mib(st["user_bytes_written"].get<uint64_t>()), st["compactions"].get<int>(),
+        st["stall_micros"].get<uint64_t>() / 1e6, Mib(disk_before), Mib(disk_after), compact_s);
     r.notes = notes;
     return r;
   }
@@ -343,9 +349,9 @@ class Bench {
     const json& es = explain["executionStats"];
     std::ostringstream notes;
     notes << "filter {zip: v} over " << flags_.num << " docs; plan "
-          << (indexed ? "IXSCAN zip_1" : "COLLSCAN") << "; last query nReturned "
-          << es["nReturned"] << ", totalKeysExamined " << es["totalKeysExamined"]
-          << ", totalDocsExamined " << es["totalDocsExamined"];
+          << (indexed ? "IXSCAN zip_1" : "COLLSCAN") << "; last query nReturned " << es["nReturned"]
+          << ", totalKeysExamined " << es["totalKeysExamined"] << ", totalDocsExamined "
+          << es["totalDocsExamined"];
     if (indexed) notes << "; index build " << build_seconds_ << " s";
     r.notes = notes.str();
     return r;
@@ -407,14 +413,22 @@ int main(int argc, char** argv) {
     if (const char* v = value("--benchmarks=")) {
       std::stringstream ss(v);
       for (std::string b; std::getline(ss, b, ',');) f.benchmarks.push_back(b);
-    } else if (const char* v = value("--num=")) f.num = std::strtoull(v, nullptr, 10);
-    else if (const char* v = value("--reads=")) f.reads = std::strtoull(v, nullptr, 10);
-    else if (const char* v = value("--value_size=")) f.value_size = std::atoi(v);
-    else if (const char* v = value("--sync=")) f.sync = std::atoi(v) != 0;
-    else if (const char* v = value("--bloom_bits=")) f.bloom_bits = std::atoi(v);
-    else if (const char* v = value("--cache_mb=")) f.cache_mb = std::atoi(v);
-    else if (const char* v = value("--db=")) f.db = v;
-    else if (const char* v = value("--seed=")) f.seed = std::strtoull(v, nullptr, 10);
+    } else if (const char* v = value("--num="))
+      f.num = std::strtoull(v, nullptr, 10);
+    else if (const char* v = value("--reads="))
+      f.reads = std::strtoull(v, nullptr, 10);
+    else if (const char* v = value("--value_size="))
+      f.value_size = std::atoi(v);
+    else if (const char* v = value("--sync="))
+      f.sync = std::atoi(v) != 0;
+    else if (const char* v = value("--bloom_bits="))
+      f.bloom_bits = std::atoi(v);
+    else if (const char* v = value("--cache_mb="))
+      f.cache_mb = std::atoi(v);
+    else if (const char* v = value("--db="))
+      f.db = v;
+    else if (const char* v = value("--seed="))
+      f.seed = std::strtoull(v, nullptr, 10);
     else {
       std::fprintf(stderr, "unknown flag %s\n", a.c_str());
       return 2;

@@ -32,8 +32,7 @@ std::shared_ptr<const Block> BlockCache::Lookup(uint64_t file_number, uint64_t o
   return it->second->block;
 }
 
-void BlockCache::Insert(uint64_t file_number, uint64_t offset,
-                        std::shared_ptr<const Block> block) {
+void BlockCache::Insert(uint64_t file_number, uint64_t offset, std::shared_ptr<const Block> block) {
   const size_t charge = block->size();
   if (charge > shard_capacity_) return;
   Key key{file_number, offset};

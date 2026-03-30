@@ -36,7 +36,8 @@ std::vector<OpRecord> BuildDb(Env* env, size_t* wal_ops) {
   auto write = [&](int n, bool deletes) {
     for (int i = 0; i < n; i++) {
       OpRecord op{"key" + std::to_string(rnd.Uniform(2000)), ""};
-      if (!deletes || !rnd.OneIn(5)) op.value = "val" + std::to_string(ops.size()) + std::string(80, 'z');
+      if (!deletes || !rnd.OneIn(5))
+        op.value = "val" + std::to_string(ops.size()) + std::string(80, 'z');
       Status s = op.value.empty() ? engine->Delete(WriteOptions(), op.key)
                                   : engine->Put(WriteOptions(), op.key, op.value);
       EXPECT_TRUE(s.ok());
@@ -166,10 +167,11 @@ TEST(CorruptionTest, RandomByteFlipsAreDetectedNeverServed) {
       SCOPED_TRACE(std::string(name) + " trial " + std::to_string(i));
       RunTrial(type, &rnd, &o);
     }
-    std::printf("corruption %-8s: %d flips -> open Corruption %d, read Corruption %d, "
-                "WAL tail dropped %d, undetected-but-correct %d\n",
-                name, per_type, o.open_corruption, o.read_corruption, o.tail_dropped,
-                o.undetected_but_correct);
+    std::printf(
+        "corruption %-8s: %d flips -> open Corruption %d, read Corruption %d, "
+        "WAL tail dropped %d, undetected-but-correct %d\n",
+        name, per_type, o.open_corruption, o.read_corruption, o.tail_dropped,
+        o.undetected_but_correct);
     if (type == FileType::kManifest || type == FileType::kCurrent) {
       EXPECT_EQ(o.open_corruption, per_type) << name << " damage must always fail Open";
     }

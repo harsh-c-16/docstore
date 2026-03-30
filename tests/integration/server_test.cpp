@@ -83,7 +83,8 @@ class ServerTest : public ::testing::Test {
 
 TEST_F(ServerTest, SixteenConcurrentClientsTimesAThousandOps) {
   StartServer(256);
-  ASSERT_TRUE(handler_->Handle({{"op", "createIndex"}, {"coll", "load"}, {"field", "client"}})["ok"] == 1);
+  ASSERT_TRUE(
+      handler_->Handle({{"op", "createIndex"}, {"coll", "load"}, {"field", "client"}})["ok"] == 1);
   constexpr int kClients = 16, kOps = 1000;
   std::atomic<int> failures{0};
   std::vector<std::thread> threads;
@@ -100,12 +101,15 @@ TEST_F(ServerTest, SixteenConcurrentClientsTimesAThousandOps) {
         json r;
         switch (i % 4) {
           case 0:
-            r = client.Call({{"op", "insert"}, {"coll", "load"},
+            r = client.Call({{"op", "insert"},
+                             {"coll", "load"},
                              {"doc", {{"_id", id}, {"client", c}, {"v", 0}}}});
             if (r["ok"] != 1 || r["insertedId"] != id) failures++;
             break;
           case 1:
-            r = client.Call({{"op", "update"}, {"coll", "load"}, {"id", id},
+            r = client.Call({{"op", "update"},
+                             {"coll", "load"},
+                             {"id", id},
                              {"update", {{"$inc", {{"v", 5}}}}}});
             if (r["ok"] != 1) failures++;
             break;
@@ -144,7 +148,7 @@ TEST_F(ServerTest, ConnectionLimitBadInputAndOversizedLines) {
   b.SendRaw(huge);
   std::string err = b.ReadLine();
   EXPECT_NE(err.find("longer than 17 MiB"), std::string::npos);
-  EXPECT_EQ(b.ReadLine(), "");  // closed after the error
+  EXPECT_EQ(b.ReadLine(), "");                   // closed after the error
   EXPECT_EQ(a.Call({{"op", "ping"}})["ok"], 1);  // other clients unaffected
 }
 

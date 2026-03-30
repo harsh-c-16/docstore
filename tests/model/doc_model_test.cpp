@@ -47,7 +47,8 @@ class DocModel {
     static const char* kNames[] = {"asha", "ben", "chen", "dana", ""};
     static const char* kCities[] = {"pune", "delhi", "goa"};
     json d{{"_id", id}};
-    if (!rnd_.OneIn(5)) d["age"] = rnd_.OneIn(4) ? json(rnd_.Uniform(10) + 0.5) : json(rnd_.Uniform(10));
+    if (!rnd_.OneIn(5))
+      d["age"] = rnd_.OneIn(4) ? json(rnd_.Uniform(10) + 0.5) : json(rnd_.Uniform(10));
     if (!rnd_.OneIn(5)) d["name"] = kNames[rnd_.Uniform(5)];
     if (rnd_.OneIn(2)) d["addr"] = {{"city", kCities[rnd_.Uniform(3)]}};
     if (rnd_.OneIn(4)) d["active"] = rnd_.OneIn(2);
@@ -192,9 +193,11 @@ class DocModel {
   }
 
   json RandomScalar(const std::string& field) {
-    if (field == "age") return rnd_.OneIn(4) ? json(rnd_.Uniform(10) + 0.5) : json(rnd_.Uniform(10));
+    if (field == "age")
+      return rnd_.OneIn(4) ? json(rnd_.Uniform(10) + 0.5) : json(rnd_.Uniform(10));
     if (field == "active") return rnd_.OneIn(2);
-    if (field == "addr.city") return std::vector<std::string>{"pune", "delhi", "goa", "x"}[rnd_.Uniform(4)];
+    if (field == "addr.city")
+      return std::vector<std::string>{"pune", "delhi", "goa", "x"}[rnd_.Uniform(4)];
     if (field == "tags") return "a";
     return std::vector<std::string>{"asha", "ben", "chen", "dana", "", "n1"}[rnd_.Uniform(6)];
   }
@@ -239,12 +242,17 @@ class DocModel {
         start = dot + 1;
       }
     };
-    auto kind = [](const json& v) { return v.is_number() ? 0 : v.is_string() ? 1 : v.is_boolean() ? 2 : 3; };
+    auto kind = [](const json& v) {
+      return v.is_number() ? 0 : v.is_string() ? 1 : v.is_boolean() ? 2 : 3;
+    };
     auto cmp = [&](const json& a, const json& b, int* out) {
       if (kind(a) != kind(b) || kind(a) == 3) return false;
-      if (kind(a) == 0) *out = a.get<double>() < b.get<double>() ? -1 : a.get<double>() > b.get<double>();
-      else if (kind(a) == 1) *out = a.get<std::string>().compare(b.get<std::string>());
-      else *out = a.get<bool>() == b.get<bool>() ? 0 : 1;
+      if (kind(a) == 0)
+        *out = a.get<double>() < b.get<double>() ? -1 : a.get<double>() > b.get<double>();
+      else if (kind(a) == 1)
+        *out = a.get<std::string>().compare(b.get<std::string>());
+      else
+        *out = a.get<bool>() == b.get<bool>() ? 0 : 1;
       if (kind(a) == 1) *out = *out < 0 ? -1 : *out > 0;
       return true;
     };
@@ -259,8 +267,11 @@ class DocModel {
           ok = false;
           for (const auto& a : arg) ok = ok || (cmp(*v, a, &r) && r == 0);
         } else {
-          ok = cmp(*v, arg, &r) && (op == "$eq" ? r == 0 : op == "$gt" ? r > 0 : op == "$gte" ? r >= 0
-                                     : op == "$lt" ? r < 0 : r <= 0);
+          ok = cmp(*v, arg, &r) && (op == "$eq"    ? r == 0
+                                    : op == "$gt"  ? r > 0
+                                    : op == "$gte" ? r >= 0
+                                    : op == "$lt"  ? r < 0
+                                                   : r <= 0);
         }
         if (!ok) return false;
       }
@@ -296,8 +307,8 @@ class DocModel {
       return out;
     };
     ASSERT_EQ(ids(plain), want) << "collscan vs oracle, filter " << filter.dump();
-    ASSERT_EQ(ids(with_index), want) << "with index vs oracle, filter " << filter.dump()
-                                     << " plan " << explain["queryPlanner"].dump();
+    ASSERT_EQ(ids(with_index), want) << "with index vs oracle, filter " << filter.dump() << " plan "
+                                     << explain["queryPlanner"].dump();
     ixscans_ += explain["queryPlanner"]["winningPlan"]["stage"] == "FETCH";
     finds_++;
     // A limited query returns a subset of the right size.
@@ -340,8 +351,8 @@ TEST(DocModelTest, RandomDocumentOpsMatchModel) {
   int total_finds = 0, total_ixscans = 0;
   for (int s = 0; s < seeds; s++) {
     const uint64_t seed = base + s;
-    SCOPED_TRACE("seed " + std::to_string(seed) + " (rerun with DOCSTORE_TEST_SEED=" +
-                 std::to_string(seed) + ")");
+    SCOPED_TRACE("seed " + std::to_string(seed) +
+                 " (rerun with DOCSTORE_TEST_SEED=" + std::to_string(seed) + ")");
     DocModel model(seed);
     for (int i = 0; i < ops && !::testing::Test::HasFatalFailure(); i++) model.Step(i);
     if (::testing::Test::HasFatalFailure()) return;
@@ -351,8 +362,9 @@ TEST(DocModelTest, RandomDocumentOpsMatchModel) {
     total_finds += model.finds_;
     total_ixscans += model.ixscans_;
   }
-  std::printf("doc-model: %d finds compared with and without indexes (%d used an index), 0 mismatches\n",
-              total_finds, total_ixscans);
+  std::printf(
+      "doc-model: %d finds compared with and without indexes (%d used an index), 0 mismatches\n",
+      total_finds, total_ixscans);
   EXPECT_GT(total_ixscans, total_finds / 10);  // the indexed side really used indexes
 }
 

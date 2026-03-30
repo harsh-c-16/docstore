@@ -77,8 +77,8 @@ class Engine {
   Engine(const Options& options, std::string dbname);
 
   Status Recover();
-  Status ReplayLog(uint64_t number, bool newest, std::shared_ptr<MemTable>* mem,
-                   VersionEdit* edit, SequenceNumber* max_sequence);
+  Status ReplayLog(uint64_t number, bool newest, std::shared_ptr<MemTable>* mem, VersionEdit* edit,
+                   SequenceNumber* max_sequence);
   Status NewLogFile(uint64_t* number, std::shared_ptr<LogWriter>* log);
   void DeleteObsoleteFiles(bool at_open);
 

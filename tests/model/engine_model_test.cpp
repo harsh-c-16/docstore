@@ -133,8 +133,8 @@ TEST(EngineModelTest, RandomOpsWithReopen) {
   const uint64_t base = test::TestSeed();
   for (int s = 0; s < seeds; s++) {
     uint64_t seed = base + s;
-    SCOPED_TRACE("seed " + std::to_string(seed) + " (rerun with DOCSTORE_TEST_SEED=" +
-                 std::to_string(seed) + ")");
+    SCOPED_TRACE("seed " + std::to_string(seed) +
+                 " (rerun with DOCSTORE_TEST_SEED=" + std::to_string(seed) + ")");
     Options options;
     options.memtable_size = 4 << 10;
     options.target_file_size = 16 << 10;

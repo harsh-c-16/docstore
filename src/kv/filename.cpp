@@ -23,7 +23,8 @@ bool ParseNumber(const std::string& digits, uint64_t* number) {
 }
 
 bool EndsWith(const std::string& s, const std::string& suffix) {
-  return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+  return s.size() >= suffix.size() &&
+         s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 }  // namespace

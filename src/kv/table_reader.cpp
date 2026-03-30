@@ -12,8 +12,8 @@ namespace docstore::kv {
 namespace {
 
 // Reads [offset, offset + size) plus its CRC and verifies it.
-Status ReadCheckedBlock(const RandomAccessFile& file, uint64_t offset, uint64_t size,
-                        bool verify, std::string* out) {
+Status ReadCheckedBlock(const RandomAccessFile& file, uint64_t offset, uint64_t size, bool verify,
+                        std::string* out) {
   Status s = file.Read(offset, size + kBlockTrailerSize, out);
   if (!s.ok()) return s;
   if (out->size() != size + kBlockTrailerSize) return Status::Corruption("truncated block read");

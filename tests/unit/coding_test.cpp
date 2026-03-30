@@ -26,8 +26,17 @@ TEST(CodingTest, FixedRoundTrip) {
 }
 
 TEST(CodingTest, VarintRoundTripAndLength) {
-  std::vector<uint64_t> values = {0, 1, 127, 128, 255, 300, 16383, 16384, UINT32_MAX,
-                                  1ull << 35, std::numeric_limits<uint64_t>::max()};
+  std::vector<uint64_t> values = {0,
+                                  1,
+                                  127,
+                                  128,
+                                  255,
+                                  300,
+                                  16383,
+                                  16384,
+                                  UINT32_MAX,
+                                  1ull << 35,
+                                  std::numeric_limits<uint64_t>::max()};
   std::string buf;
   for (uint64_t v : values) PutVarint64(&buf, v);
   std::string_view in = buf;

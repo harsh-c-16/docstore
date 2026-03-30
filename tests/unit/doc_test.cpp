@@ -74,7 +74,8 @@ TEST(UpdateOpsTest, SetUnsetInc) {
   EXPECT_EQ(doc["b"]["c"], 3);
   ASSERT_TRUE(ApplyUpdate(json::parse(R"({"$unset": {"a": "", "missing.deep": ""}})"), &doc).ok());
   EXPECT_FALSE(doc.contains("a"));
-  ASSERT_TRUE(ApplyUpdate(json::parse(R"({"$inc": {"b.c": 10, "counter": 2, "f": 1}})"), &doc).ok());
+  ASSERT_TRUE(
+      ApplyUpdate(json::parse(R"({"$inc": {"b.c": 10, "counter": 2, "f": 1}})"), &doc).ok());
   EXPECT_EQ(doc["b"]["c"], 13);
   EXPECT_TRUE(doc["b"]["c"].is_number_integer());
   EXPECT_EQ(doc["counter"], 2);  // missing field counts as 0

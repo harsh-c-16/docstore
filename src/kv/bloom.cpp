@@ -28,7 +28,8 @@ std::string BloomFilterBuilder::Finish() const {
     const uint64_t delta = std::rotr(h, 17);
     for (int i = 0; i < k_; i++) {
       uint64_t bit = (h + static_cast<uint64_t>(i) * delta) % bits;
-      filter[bit / 8] = static_cast<char>(static_cast<uint8_t>(filter[bit / 8]) | (1u << (bit % 8)));
+      filter[bit / 8] =
+          static_cast<char>(static_cast<uint8_t>(filter[bit / 8]) | (1u << (bit % 8)));
     }
   }
   filter.push_back(static_cast<char>(k_));

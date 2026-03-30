@@ -55,11 +55,14 @@ TEST_F(DatabaseTest, UpsertUpdateDelete) {
   EXPECT_EQ(Get("c", "a"), json::parse(R"({"_id": "a", "m": 2})"));
   EXPECT_TRUE(db_->Upsert("c", json::parse(R"({"m": 2})"), {}).IsInvalidArgument());  // no _id
 
-  ASSERT_TRUE(db_->Update("c", "a", json::parse(R"({"$inc": {"m": 5}, "$set": {"x.y": true}})"), {}).ok());
+  ASSERT_TRUE(
+      db_->Update("c", "a", json::parse(R"({"$inc": {"m": 5}, "$set": {"x.y": true}})"), {}).ok());
   EXPECT_EQ(Get("c", "a"), json::parse(R"({"_id": "a", "m": 7, "x": {"y": true}})"));
   EXPECT_TRUE(db_->Update("c", "zz", json::parse(R"({"$set": {"q": 1}})"), {}).IsNotFound());
-  EXPECT_TRUE(db_->Update("c", "a", json::parse(R"({"$set": {"_id": "b"}})"), {}).IsInvalidArgument());
-  EXPECT_TRUE(db_->Update("c", "a", json::parse(R"({"$unset": {"_id": ""}})"), {}).IsInvalidArgument());
+  EXPECT_TRUE(
+      db_->Update("c", "a", json::parse(R"({"$set": {"_id": "b"}})"), {}).IsInvalidArgument());
+  EXPECT_TRUE(
+      db_->Update("c", "a", json::parse(R"({"$unset": {"_id": ""}})"), {}).IsInvalidArgument());
   EXPECT_TRUE(db_->Update("c", "a", json::parse(R"({"$set": {"$x": 1}})"), {}).IsInvalidArgument());
 
   ASSERT_TRUE(db_->Delete("c", "a", {}).ok());

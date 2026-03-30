@@ -25,7 +25,7 @@ struct ScanRange {
 
 struct Plan {
   bool collscan = true;
-  std::string field;      // indexed field (IXSCAN only)
+  std::string field;  // indexed field (IXSCAN only)
   uint32_t index_id = 0;
   std::vector<ScanRange> ranges;  // in key order; $in gives one point range per value
 };

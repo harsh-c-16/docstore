@@ -391,8 +391,7 @@ Status Engine::Scan(const ReadOptions& options, size_t limit,
 // ---------------------------------------------------------------- background work
 
 bool Engine::NeedsCompaction() const {
-  return manual_compaction_ ||
-         versions_->current()->NumFiles(0) >= options_.l0_compaction_trigger;
+  return manual_compaction_ || versions_->current()->NumFiles(0) >= options_.l0_compaction_trigger;
 }
 
 void Engine::BackgroundLoop() {
@@ -410,8 +409,8 @@ void Engine::BackgroundLoop() {
     l.lock();
     if (!flush && full) manual_compaction_ = false;
     if (!s.ok() && bg_error_.ok()) {
-      Log(LogLevel::kError, std::string(flush ? "flush" : "compaction") +
-                                " failed: " + s.ToString());
+      Log(LogLevel::kError,
+          std::string(flush ? "flush" : "compaction") + " failed: " + s.ToString());
       bg_error_ = s;
     }
     bg_done_cv_.notify_all();

@@ -212,7 +212,7 @@ TEST(BloomTest, TinyAndMalformedFilters) {
   std::string filter = builder.Finish();
   EXPECT_EQ(filter.size(), 9u);  // 64-bit minimum + k byte
   EXPECT_TRUE(BloomKeyMayMatch(filter, "only"));
-  EXPECT_TRUE(BloomKeyMayMatch("", "x"));           // malformed: always "maybe"
+  EXPECT_TRUE(BloomKeyMayMatch("", "x"));              // malformed: always "maybe"
   EXPECT_TRUE(BloomKeyMayMatch("\xff\xff\x7f", "x"));  // k out of range
 }
 
@@ -249,10 +249,10 @@ TEST(BlockCacheTest, CapacityShardingAndHeldBlocksStayValid) {
     cache.Insert(3, off, block);
   }
   EXPECT_LE(cache.usage(), 16u * 10000);
-  EXPECT_GT(cache.usage(), 16u * 10000 / 2);  // all shards are used
-  EXPECT_EQ(cache.Lookup(3, 0), nullptr);     // long evicted...
+  EXPECT_GT(cache.usage(), 16u * 10000 / 2);        // all shards are used
+  EXPECT_EQ(cache.Lookup(3, 0), nullptr);           // long evicted...
   EXPECT_EQ(held->data(), std::string(1000, 'b'));  // ...but still valid for its holder
-  cache.Insert(3, 1, MakeBlock(20000));  // bigger than a shard: not cached
+  cache.Insert(3, 1, MakeBlock(20000));             // bigger than a shard: not cached
   EXPECT_EQ(cache.Lookup(3, 1), nullptr);
 }
 

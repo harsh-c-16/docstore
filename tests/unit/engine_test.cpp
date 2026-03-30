@@ -91,10 +91,10 @@ TEST_F(EngineTest, ReadsSpanMemtableAndTables) {
   ASSERT_TRUE(engine_->Flush().ok());
   Put("a", "new");
   ASSERT_TRUE(engine_->Delete(WriteOptions(), "b").ok());
-  EXPECT_EQ(Get("a"), "new");      // memtable shadows the table
+  EXPECT_EQ(Get("a"), "new");        // memtable shadows the table
   EXPECT_EQ(Get("b"), "NOT_FOUND");  // memtable tombstone shadows the table
   ASSERT_TRUE(engine_->Flush().ok());
-  EXPECT_EQ(Get("a"), "new");      // newer L0 file wins
+  EXPECT_EQ(Get("a"), "new");        // newer L0 file wins
   EXPECT_EQ(Get("b"), "NOT_FOUND");  // tombstone kept in L0
   EXPECT_EQ(engine_->Stats()["l0_files"], 2);
   Open();
@@ -257,7 +257,7 @@ TEST_F(EngineTest, ScanHonoursBoundsTombstonesAndLimit) {
   Put("b", "2");
   Put("c", "3");
   ASSERT_TRUE(engine_->Flush().ok());
-  Put("b", "2b");                                       // newer version in the memtable
+  Put("b", "2b");                                          // newer version in the memtable
   ASSERT_TRUE(engine_->Delete(WriteOptions(), "c").ok());  // tombstone over a flushed key
   Put("d", "4");
   KVs out;

@@ -28,7 +28,7 @@ struct Options {
   int l0_stop_trigger = 12;
   uint64_t target_file_size = 8 << 20;
   size_t block_size = 4 << 10;
-  int bloom_bits_per_key = 10;  // 0 disables bloom filters
+  int bloom_bits_per_key = 10;         // 0 disables bloom filters
   size_t block_cache_bytes = 8 << 20;  // 0 disables the block cache
   // Background WAL sync period for sync=false writes (MongoDB's commitIntervalMs is 100).
   // 0 disables background syncing.

@@ -28,10 +28,14 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
-    if (arg == "--db") db_path = next();
-    else if (arg == "--host") host = next();
-    else if (arg == "--port") port = std::atoi(next().c_str());
-    else if (arg == "--max-conns") max_conns = std::atoi(next().c_str());
+    if (arg == "--db")
+      db_path = next();
+    else if (arg == "--host")
+      host = next();
+    else if (arg == "--port")
+      port = std::atoi(next().c_str());
+    else if (arg == "--max-conns")
+      max_conns = std::atoi(next().c_str());
     else {
       std::fprintf(stderr, "unknown flag %s\n", arg.c_str());
       return 2;

@@ -63,8 +63,8 @@ TEST_F(PowerLossTest, PrefixPropertyHoldsAfterRandomPowerCuts) {
   int total_ops = 0;
   for (int iter = 0; iter < iterations; iter++) {
     const uint64_t seed = base_seed + iter;
-    SCOPED_TRACE("seed " + std::to_string(seed) + " (rerun with DOCSTORE_TEST_SEED=" +
-                 std::to_string(seed) + ")");
+    SCOPED_TRACE("seed " + std::to_string(seed) +
+                 " (rerun with DOCSTORE_TEST_SEED=" + std::to_string(seed) + ")");
     Random rnd(seed);
     FaultInjectionEnv env;
     Options options;
@@ -101,8 +101,8 @@ TEST_F(PowerLossTest, PrefixPropertyHoldsAfterRandomPowerCuts) {
           batch.Delete(key);
           op.puts.emplace_back(key, "");
         } else {
-          std::string value = "v" + std::to_string(i) + "." + std::to_string(j) +
-                              std::string(rnd.Uniform(60), 'x');
+          std::string value =
+              "v" + std::to_string(i) + "." + std::to_string(j) + std::string(rnd.Uniform(60), 'x');
           batch.Put(key, value);
           op.puts.emplace_back(key, value);
         }
