@@ -1,7 +1,21 @@
 # DocStore design notes
 
 This file records every design decision, the alternatives that were rejected, the lock order,
-and every place the implementation deviates from its original requirements. It grows with the project.
+and every place the implementation deviates from its original requirements. Diagrams are in
+[architecture.md](architecture.md), byte layouts in [formats.md](formats.md).
+
+## The big choices
+
+| Choice | Picked | Rejected, and why |
+|---|---|---|
+| Storage structure | **LSM tree** (WAL + memtable + immutable sorted tables + compaction) | **B-tree** (WiredTiger's default, InnoDB): updates in place need page-level latching, a buffer pool with dirty-page eviction and checkpointing to be crash-safe. An LSM turns every write into a sequential append and every on-disk file is immutable, which makes crash safety and concurrent reads much simpler to get right and to test. Costs: write amplification from compaction (measured: 9.05 in the overwrite benchmark) and reads that may check several files (bounded by bloom filters and L0 triggers). |
+| Memtable | **Skiplist**, one writer, lock-free readers (D9) | **Red-black tree** (`std::map`): rebalancing moves nodes, so readers would need a lock. A skiplist insert only adds pointers, so release/acquire publication is enough. |
+| Compaction | **Two-level** (all of L0 + overlapping L1 -> L1, D16) | **Leveled** (lower write amplification at scale, more picking logic) and **size-tiered** (lowest write amplification, up to 2x space, many overlapping runs to read). Two levels is the simplest layout where tombstones can be dropped. |
+| Write concurrency | **Single writer** (`write_mutex_`), WAL fdatasync outside the WAL mutex (D6) | **Group commit** (leader/follower: one fsync covers every queued writer). It is the standard fix for `sync=true` throughput (measured: 640 writes/s with one fdatasync each), but the single writer is what makes the document layer's read-modify-write for index maintenance correct without per-key locks. Listed as future work. |
+| Server | **Thread per connection** (D30) | **epoll** event loop + worker pool: scales to many idle connections, but every read/write becomes a state machine. Listed as future work. |
+| Indexes | **Sparse single-field** indexes (D26) | Dense indexes with null/missing entries, and multikey (array) indexes: both need extra matching rules to keep index results identical to collection scans. |
+| Dropping data | **Drop by catalog entry + CompactionFilter** (D23) | Deleting every key: O(collection size) tombstones under the write lock. |
+| Document format | **BSON via nlohmann::json** (D24) | Storing JSON text: no typed numbers, and slower to parse than a length-prefixed binary format. |
 
 ## Decisions
 
