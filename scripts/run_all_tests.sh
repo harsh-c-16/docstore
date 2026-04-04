@@ -40,5 +40,5 @@ for i in "${!NAMES[@]}"; do printf '%-16s %s\n' "${NAMES[$i]}" "${RESULTS[$i]}";
 grep -h -E "power-loss:|process-crash:|stress:|doc-model:" build/long-release.log 2>/dev/null |
   sed 's/^[0-9]*: //' | sort -u
 grep -h -E "tests passed|tests failed" build/fast-*.log build/long-release.log 2>/dev/null |
-  sort | uniq -c
+  sed "s/[[:space:]]*$//" | sort | uniq -c
 exit $FAILED
