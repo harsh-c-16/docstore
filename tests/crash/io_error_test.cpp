@@ -69,6 +69,9 @@ class IoErrorTest : public ::testing::Test {
 };
 
 TEST_F(IoErrorTest, FailedFlushWritesBecomeReadOnlyAndRecover) {
+  // Keep the fault injection scoped to the flush under test; automatic compaction runs on the
+  // same background thread and would otherwise consume the injected append failure.
+  options_.l0_compaction_trigger = 100;
   Open();
   // Every injection point from the first append of the flush until past its last one.
   for (int n = 0; successes_ < 2; n++) {
